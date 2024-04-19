@@ -2,7 +2,7 @@
 all: simulation
 
 simulation: simulation.cu
-	nvcc -g -G -arch=sm_89 -I../common simulation.cu -o sim_main
+	nvcc -g -G -arch=sm_89 -I../common simulation.cu -o sim_main.exe
 
 clean:
-	rm -f sim_main
+	rm -f sim_main.exe
