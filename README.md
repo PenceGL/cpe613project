@@ -4,53 +4,28 @@
 
 ### About The Project
 
-There are many great README templates available on GitHub; however, I didn't find one that really suited my needs so I created this enhanced one. I want to create a README template so amazing that it'll be the last one you ever need -- I think this is it.
-
-Here's why:
-* Your time should be focused on creating something amazing. A project that solves a problem and helps others
-* You shouldn't be doing the same tasks over and over like creating a README from scratch
-* You should implement DRY principles to the rest of your life :smile:
-
-Of course, no one template will serve all projects since your needs may be different. So I'll be adding more in the near future. You may also suggest changes by forking this repo and creating a pull request or opening an issue. Thanks to all the people have contributed to expanding this template!
-
-Use the `BLANK_README.md` to get started.
+Newton's law of universal gravitation, the gravitational force between two particles:
+`F = G * (m1 * m2) / (r^2)`
+F = gravitational force between the particles
+G = gravitational constant
+m1 and m2 = masses of the two particles
+r = distance between the particles
 
 
-<!-- GETTING STARTED -->
 ### Getting Started
-
-This is an example of how you may give instructions on setting up your project locally.
-To get a local copy up and running follow these simple example steps.
+This simulation is currently hard-coded to instantiate two groups of particles - electrons and protons - for the purpose simulating hydrogen atom formation as an initial project milestone goal.
 
 ### Prerequisites
-
-This is an example of how to list things you need to use the software and how to install them.
-* npm
-  ```sh
-  npm install npm@latest -g
-  ```
+<!-- Any required libraries or other configuration the project needs to be able to run. -->
 
 ### Installation
-
-_Below is an example of how you can instruct your audience on installing and setting up your app. This template doesn't rely on any external dependencies or services._
-
-1. Get a free API Key at [https://example.com](https://example.com)
-2. Clone the repo
-   ```sh
-   git clone https://github.com/your_username_/Project-Name.git
-   ```
-3. Install NPM packages
-   ```sh
-   npm install
-   ```
-4. Enter your API in `config.js`
-   ```js
-   const API_KEY = 'ENTER YOUR API';
-   ```
+<!-- Instructions on project setup for the audience -->
+No major installation is required due to the current simple nature of the project. Simply change directory into the repository root and then run `make` to build the project executable.
 
 ### Usage
-
-Use this space to show useful examples of how a project can be used. Additional screenshots, code examples and demos work well in this space. You may also link to more resources.
+<!-- Use this space to show useful examples of how a project can be used. Additional screenshots, code examples and demos work well in this space. You may also link to more resources. -->
+Once built, execute a simulation using the following syntax:
+Usage: `./sim_main.exe <num_particles_per_group> <num_steps> <delta_time>`
 
 
 ### Contact
