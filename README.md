@@ -22,6 +22,9 @@ This simulation is currently hard-coded to instantiate two groups of particles -
 No major installation is required.  
 Simply change directory into the repository root and then run `make` to build the project executable.
 
+**Note:** The project makefile is configured to use `-arch=sm_89` when invoking NVCC.  
+This may need to be updated for your specific GPU architecture.
+
 ### Usage
 <!-- Use this space to show useful examples of how a project can be used. Additional screenshots, code examples and demos work well in this space. You may also link to more resources. -->
 Once built, execute a simulation using the following syntax:  
