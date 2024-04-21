@@ -141,8 +141,11 @@ int main(int argc, char **argv)
 
     // SIMULATION CONFIGURATION VALUES
     //-------------------------------------------------------------------------------
+    // hardcoded number of groups for now
     int numGroups = 2;
     int numParticlesPerGroup;
+    int numSteps;
+    float deltaTime;
     std::string log_name = "particle_data.csv";
 
     // ARG PARSING
@@ -153,24 +156,40 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    // int numGroups = std::stoi(argv[1]);
-
-    if (!std::stoi(argv[1]) >= 100)
+    numParticlesPerGroup = std::stoi(argv[1]);
+    // enforce a minimum number of particles
+    if (numParticlesPerGroup < 50)
     {
-        numParticlesPerGroup = 100;
+        numParticlesPerGroup = 50;
     }
-    int numSteps = std::stoi(argv[2]);
-    float deltaTime = std::stof(argv[3]) * FEMTOSECOND;
+
+    numSteps = std::stoi(argv[2]);
+    // enforce a minimum number of steps
+    if (numSteps < 50)
+    {
+        numSteps = 50;
+    }
+
+    deltaTime = std::stof(argv[3]);
+    if (deltaTime < 0.1)
+    {
+        deltaTime = 0.1;
+    }
+    // convert delta time to femtoseconds
+    deltaTime *= FEMTOSECOND;
 
     std::cout << "Configuration received:" << std::endl;
-    std::cout << "Number of groups = " << numGroups
-              << ", particles per group = " << numParticlesPerGroup << std::endl;
-    std::cout << "Number of steps = " << numSteps
-              << ", delta time = " << deltaTime << "femtoseconds" << std::endl;
+    std::cout << "-----------------------------------------------------------" << std::endl;
+    std::cout << "\tNumber of groups = " << numGroups << std::endl;
+    std::cout << "\tParticles per group = " << numParticlesPerGroup << std::endl;
+    std::cout << "\tNumber of steps = " << numSteps << std::endl;
+    std::cout << "\tDelta time per step = " << deltaTime << "femtoseconds" << std::endl;
+    std::cout << "-----------------------------------------------------------" << std::endl;
 
     // PARTICLE CONFIGURATION
     //-------------------------------------------------------------------------------
-    std::vector<ParticleGroup> particleGroups(2); // Create two particle groups: electrons and protons
+    // create two particle groups: electrons and protons
+    std::vector<ParticleGroup> particleGroups(2);
 
     // electron group
     particleGroups[0].numParticles = numParticlesPerGroup;
@@ -202,9 +221,11 @@ int main(int argc, char **argv)
         p.charge = 1.0f;         // proton charge (atomic units)
     }
 
-    // SIMULATION CONFIGURATION
+    // LOG FILE SETUP
     //-------------------------------------------------------------------------------
-    int saveInterval = 100; // save data every 100 steps
+    // save interval in number of time steps
+    // data will be logged to the output file at increments of this value
+    int logInterval = 100;
 
     std::cout << "Creating log file: " << log_name << std::endl;
     std::ofstream file(log_name);
@@ -212,6 +233,7 @@ int main(int argc, char **argv)
 
     // SIMULATION LOOP
     //-------------------------------------------------------------------------------
+    std::cout << "Launching simulation..." << std::endl;
     for (int step = 0; step < numSteps; ++step)
     {
         for (int g = 0; g < numGroups; ++g)
@@ -235,7 +257,7 @@ int main(int argc, char **argv)
             cudaFree(d_particles);
         }
 
-        if (step % saveInterval == 0)
+        if (step % logInterval == 0)
         {
             saveParticleData(particleGroups, step, file);
         }
@@ -243,6 +265,7 @@ int main(int argc, char **argv)
 
     // SIMULATION END
     //-------------------------------------------------------------------------------
+    std::cout << "Simulation completed successfully." << std::endl;
 
     return 0;
 }
