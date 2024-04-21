@@ -4,13 +4,12 @@
 
 ### About The Project
 
-Newton's law of universal gravitation, the gravitational force between two particles:
-`F = G * (m1 * m2) / (r^2)`
-F = gravitational force between the particles
-G = gravitational constant
-m1 and m2 = masses of the two particles
-r = distance between the particles
-
+Newton's law of universal gravitation, the gravitational force between two particles:  
+`F = G * (m1 * m2) / (r^2)`  
+F = gravitational force between the particles  
+G = gravitational constant  
+m1 and m2 = masses of the two particles  
+r = distance between the particles  
 
 ### Getting Started
 This simulation is currently hard-coded to instantiate two groups of particles - electrons and protons - for the purpose simulating hydrogen atom formation as an initial project milestone goal.
