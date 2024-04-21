@@ -19,14 +19,15 @@ This simulation is currently hard-coded to instantiate two groups of particles -
 
 ### Installation
 <!-- Instructions on project setup for the audience -->
-No major installation is required due to the current simple nature of the project. Simply change directory into the repository root and then run `make` to build the project executable.
+No major installation is required.  
+Simply change directory into the repository root and then run `make` to build the project executable.
 
 ### Usage
 <!-- Use this space to show useful examples of how a project can be used. Additional screenshots, code examples and demos work well in this space. You may also link to more resources. -->
-Once built, execute a simulation using the following syntax:
-Usage: `./sim_main.exe <num_particles_per_group> <num_steps> <delta_time>`
+Once built, execute a simulation using the following syntax:  
+Usage: `./sim_main.exe <num_particles_per_group> <num_steps> <delta_time>`  
 
 
 ### Contact
 
-Your Name - email@example.com
+George Pence - gp0038@uah.edu
