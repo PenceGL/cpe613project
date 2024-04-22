@@ -3,13 +3,23 @@
 ## George Pence
 
 ### About The Project
+The goal for this project is to create a simple, low-fidelity initial implementation of a
+N-body particle simulation with an initial focus on interactions between electrons and
+protons for the purpose of analyzing Hydrogen atom formation.
 
-Newton's law of universal gravitation, the gravitational force between two particles:  
-`F = G * (m1 * m2) / (r^2)`  
-F = gravitational force between the particles  
-G = gravitational constant  
-m1 and m2 = masses of the two particles  
-r = distance between the particles  
+A long-term idea for what this kind of software might evolve into would be a tool that
+could, if made efficient and scalable, be used to accelerate the discovery and analysis of
+potentially undiscovered materials – or new combinations of materials altogether – more
+efficiently than humans can on their own with unassisted methods.
+
+Theoretically, by rapidly simulating various possible combinations and interactions of
+particles such as electrons, protons, or even larger, more complex molecules, new
+materials with desirable properties such as high strength, thermal stability, or electrical
+conductivity could be discovered.
+
+To maintain a realistic scope for this project, the milestone I have set to achieve is to
+simulate Hydrogen atom formation through simulating two groups of protons and
+electrons and analyzing the resulting data from their simulated interaction.
 
 ### Getting Started
 This simulation is currently hard-coded to instantiate two groups of particles - electrons and protons - for the purpose simulating hydrogen atom formation as an initial project milestone goal.
