@@ -18,19 +18,18 @@ materials with desirable properties such as high strength, thermal stability, or
 conductivity could be discovered.
 
 To maintain a realistic scope for this project, the milestone I have set to achieve is to
-simulate Hydrogen atom formation through simulating two groups of protons and
-electrons and analyzing the resulting data from their simulated interaction.
-
-### Getting Started
-This simulation is currently hard-coded to instantiate two groups of particles - electrons and protons - for the purpose simulating hydrogen atom formation as an initial project milestone goal.
+simulate Hydrogen atom formation through instantiating two groups of protons and
+electrons and analyzing the resulting data from their interaction.
 
 ### Prerequisites
-<!-- Any required libraries or other configuration the project needs to be able to run. -->
+For this project, I am using the following CUDA version:  
+`CUDA compilation tools, release 12.4, V12.4.99 Build cuda_12.4.r12.4/compiler.33961263_0`  
+However, the code should compile with any recent CUDA version, so just ensure a recent (>12.2) version of CUDA is installed.
 
 ### Installation
 <!-- Instructions on project setup for the audience -->
 No major installation is required.  
-Simply change directory into the repository root and then run `make` to build the project executable.
+Simply change directory into the repository root and then run `make` to build the project executable.  
 
 **Note:** The project makefile is configured to use `-arch=sm_89` when invoking NVCC.  
 This may need to be updated for your specific GPU architecture.
