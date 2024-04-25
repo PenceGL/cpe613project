@@ -5,11 +5,14 @@
 #include <fstream>
 
 #include <cuda_runtime.h>
+#include "helper_cuda.h"
 
 #define BLOCK_SIZE 256
+#define MAX_FLOAT 3.402823466e+38f;
 
 struct Particle
 {
+    int id;
     float3 position;
     float3 velocity;
     float3 force;
@@ -47,17 +50,17 @@ __device__ float3 operator+(const float3 &a, const float3 &b)
 //-------------------------------------------------------------------------------
 __global__ void calculateForces(
     Particle *particles,
+    Particle *otherParticles,
     int numParticles,
+    int numOtherParticles,
     float deltaTime)
 {
-    // verify that the thread being used does not exceed the number of particles
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numParticles)
     {
         return;
     }
 
-    // obtain reference to current particle
     Particle &p = particles[idx];
     p.force = make_float3(0.0f, 0.0f, 0.0f);
 
@@ -73,9 +76,10 @@ __global__ void calculateForces(
         Particle &q = particles[i];
         // calculate position difference between the two particles
         float3 diff = q.position - p.position;
+
         // calculate distance (magnitude) between particles
         float dist = sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
-        // obtain the inverse of the distance
+
         // 1e-5f is added to dist to avoid division by zero
         // in case the particles are extremely close to each other
         float invDist = 1.0f / (dist + 1e-5f);
@@ -88,8 +92,24 @@ __global__ void calculateForces(
         float force = p.mass * q.mass * invDist3;
         p.force = p.force + (diff * force);
 
-        // electrostatic force (Coulomb's law)
-        float k = 8.99e9f; // Coulomb's constant (N⋅m²/C²)
+        // electrostatic force calculation (Coulomb's law)
+        float k = 8.99e9f;
+        float forceElectrostatic = k * p.charge * q.charge * invDist3;
+        p.force = p.force + (diff * forceElectrostatic);
+    }
+
+    for (int i = 0; i < numOtherParticles; ++i)
+    {
+        Particle &q = otherParticles[i];
+        float3 diff = q.position - p.position;
+        float dist = sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
+        float invDist = 1.0f / (dist + 1e-5f);
+        float invDist3 = invDist * invDist * invDist;
+
+        float force = p.mass * q.mass * invDist3;
+        p.force = p.force + (diff * force);
+
+        float k = 8.99e9f;
         float forceElectrostatic = k * p.charge * q.charge * invDist3;
         p.force = p.force + (diff * forceElectrostatic);
     }
@@ -113,25 +133,40 @@ __global__ void integrateParticles(
     p.position = p.position + (p.velocity * deltaTime);
 }
 
-void saveParticleData(
-    const std::vector<ParticleGroup> &particleGroups,
+__global__ void saveParticleData(
+    const Particle *electrons,
+    const Particle *protons,
+    int numElectrons,
+    int numProtons,
     int step,
-    std::ofstream &file)
+    float *distances,
+    int *nearestProtonIds)
 {
-    for (int g = 0; g < particleGroups.size(); ++g)
-    {
-        const ParticleGroup &group = particleGroups[g];
-        for (int i = 0; i < group.numParticles; ++i)
-        {
-            const Particle &p = group.particles[i];
-            float forceMagnitude = sqrt(p.force.x * p.force.x + p.force.y * p.force.y + p.force.z * p.force.z);
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numElectrons)
+        return;
 
-            file << step << "," << g << "," << i << ","
-                 << p.position.x << "," << p.position.y << "," << p.position.z << ","
-                 << p.velocity.x << "," << p.velocity.y << "," << p.velocity.z << ","
-                 << p.charge << "," << forceMagnitude << "\n";
+    const Particle &electron = electrons[idx];
+
+    float minDistance = MAX_FLOAT;
+    int nearestProtonId = -1;
+
+    for (int j = 0; j < numProtons; ++j)
+    {
+        const Particle &proton = protons[j];
+
+        float3 diff = electron.position - proton.position;
+        float distance = sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
+
+        if (distance < minDistance)
+        {
+            minDistance = distance;
+            nearestProtonId = proton.id;
         }
     }
+
+    distances[idx] = minDistance;
+    nearestProtonIds[idx] = nearestProtonId;
 }
 
 int main(int argc, char **argv)
@@ -141,14 +176,13 @@ int main(int argc, char **argv)
 
     // SIMULATION CONFIGURATION VALUES
     //-------------------------------------------------------------------------------
-    // hardcoded number of groups for now
-    int numGroups = 2;
-    int numParticlesPerGroup;
-    int numSteps;
-    float deltaTime;
+    int numGroups = 2; // hardcoded number of groups for now
+    int numParticlesPerGroup = 0;
+    int numSteps = 0;
+    float deltaTime = 0.0;
     std::string log_name = "particle_data.csv";
 
-    // ARG PARSING
+    // ARGUMENT PARSING
     //-------------------------------------------------------------------------------
     if (argc != 4)
     {
@@ -188,7 +222,7 @@ int main(int argc, char **argv)
 
     // PARTICLE CONFIGURATION
     //-------------------------------------------------------------------------------
-    // create two particle groups: electrons and protons
+    // create two particle groups: one for electrons and one for protons
     std::vector<ParticleGroup> particleGroups(2);
 
     // electron group
@@ -197,6 +231,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < numParticlesPerGroup; ++i)
     {
         Particle &p = particleGroups[0].particles[i];
+        p.id = i;
         p.position = make_float3(rand() / (float)RAND_MAX * 10.0f * ANGSTROM,
                                  rand() / (float)RAND_MAX * 10.0f * ANGSTROM,
                                  rand() / (float)RAND_MAX * 10.0f * ANGSTROM);
@@ -212,6 +247,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < numParticlesPerGroup; ++i)
     {
         Particle &p = particleGroups[1].particles[i];
+        p.id = i;
         p.position = make_float3(rand() / (float)RAND_MAX * 10.0f * ANGSTROM,
                                  rand() / (float)RAND_MAX * 10.0f * ANGSTROM,
                                  rand() / (float)RAND_MAX * 10.0f * ANGSTROM);
@@ -229,43 +265,99 @@ int main(int argc, char **argv)
 
     std::cout << "Creating log file: " << log_name << std::endl;
     std::ofstream file(log_name);
-    file << "Step,Group,ParticleID,PositionX,PositionY,PositionZ,VelocityX,VelocityY,VelocityZ,Charge,ForceMagnitude\n";
+    file << "Step,ElectronID,NearestProtonID,Distance,ElectronPosX,ElectronPosY,ElectronPosZ,NearestProtonPosX,NearestProtonPosY,NearestProtonPosZ\n";
+
+    // DEVICE MEMORY SETUP
+    //-------------------------------------------------------------------------------
+    // Allocate device memory for particle groups
+    Particle *d_electrons;
+    Particle *d_protons;
+    cudaMalloc(&d_electrons, particleGroups[0].numParticles * sizeof(Particle));
+    cudaMalloc(&d_protons, particleGroups[1].numParticles * sizeof(Particle));
+
+    // Copy particle data from host to device
+    cudaMemcpy(d_electrons, particleGroups[0].particles.data(), particleGroups[0].numParticles * sizeof(Particle), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_protons, particleGroups[1].particles.data(), particleGroups[1].numParticles * sizeof(Particle), cudaMemcpyHostToDevice);
+
+    // Allocate device memory for output arrays
+    float *d_distances;
+    int *d_nearestProtonIds;
+    cudaMalloc(&d_distances, particleGroups[0].numParticles * sizeof(float));
+    cudaMalloc(&d_nearestProtonIds, particleGroups[0].numParticles * sizeof(int));
 
     // SIMULATION LOOP
     //-------------------------------------------------------------------------------
     std::cout << "Launching simulation..." << std::endl;
+
     for (int step = 0; step < numSteps; ++step)
     {
-        for (int g = 0; g < numGroups; ++g)
+        for (int group_num = 0; group_num < numGroups; ++group_num)
         {
-            ParticleGroup &group = particleGroups[g];
-            Particle *d_particles;
-            cudaMalloc(&d_particles, group.numParticles * sizeof(Particle));
-            cudaMemcpy(d_particles, group.particles.data(), group.numParticles * sizeof(Particle), cudaMemcpyHostToDevice);
+            // swap focus of group data to ensure each group is focused for calculations
+            // on every time step
+            Particle *d_particles = (group_num == 0) ? d_electrons : d_protons;
+            Particle *d_otherParticles = (group_num == 0) ? d_protons : d_electrons;
 
-            calculateForces<<<(group.numParticles + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
+            int numParticles = particleGroups[group_num].numParticles;
+            int numOtherParticles = particleGroups[1 - group_num].numParticles;
+
+            calculateForces<<<(numParticles + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
                 d_particles,
-                group.numParticles,
+                d_otherParticles,
+                numParticles,
+                numOtherParticles,
                 deltaTime);
 
-            integrateParticles<<<(group.numParticles + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
+            integrateParticles<<<(numParticles + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
                 d_particles,
-                group.numParticles,
+                numParticles,
                 deltaTime);
-
-            cudaMemcpy(group.particles.data(), d_particles, group.numParticles * sizeof(Particle), cudaMemcpyDeviceToHost);
-            cudaFree(d_particles);
         }
 
         if (step % logInterval == 0)
         {
-            saveParticleData(particleGroups, step, file);
+            // launch the saveParticleData kernel
+            saveParticleData<<<(particleGroups[0].numParticles + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
+                d_electrons,
+                d_protons,
+                particleGroups[0].numParticles,
+                particleGroups[1].numParticles,
+                step,
+                d_distances,
+                d_nearestProtonIds);
+
+            // copy the output arrays from device to host
+            std::vector<float> distances(particleGroups[0].numParticles);
+            std::vector<int> nearestProtonIds(particleGroups[0].numParticles);
+            cudaMemcpy(distances.data(), d_distances, particleGroups[0].numParticles * sizeof(float), cudaMemcpyDeviceToHost);
+            cudaMemcpy(nearestProtonIds.data(), d_nearestProtonIds, particleGroups[0].numParticles * sizeof(int), cudaMemcpyDeviceToHost);
+
+            // write the data to the log file
+            for (int i = 0; i < particleGroups[0].numParticles; ++i)
+            {
+                const Particle &electron = particleGroups[0].particles[i];
+                const Particle &proton = particleGroups[1].particles[nearestProtonIds[i]];
+
+                file << step << "," << electron.id << "," << proton.id << ","
+                     << distances[i] << ","
+                     << electron.position.x << "," << electron.position.y << "," << electron.position.z << ","
+                     << proton.position.x << "," << proton.position.y << "," << proton.position.z << "\n";
+            }
         }
     }
 
-    // SIMULATION END
-    //-------------------------------------------------------------------------------
-    std::cout << "Simulation completed successfully." << std::endl;
+    // Copy updated particle data from device to host
+    cudaMemcpy(particleGroups[0].particles.data(), d_electrons, particleGroups[0].numParticles * sizeof(Particle), cudaMemcpyDeviceToHost);
+    cudaMemcpy(particleGroups[1].particles.data(), d_protons, particleGroups[1].numParticles * sizeof(Particle), cudaMemcpyDeviceToHost);
 
+    // SIMULATION TEARDOWN
+    //-------------------------------------------------------------------------------
+    // Free device memory
+    cudaFree(d_electrons);
+    cudaFree(d_protons);
+    cudaFree(d_distances);
+    cudaFree(d_nearestProtonIds);
+
+    std::cout << "Simulation completed successfully." << std::endl;
     return 0;
 }
