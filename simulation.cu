@@ -3,6 +3,7 @@
 #include <cmath>
 #include <vector>
 #include <fstream>
+#include <random>
 
 #include <cuda_runtime.h>
 #include "helper_cuda.h"
@@ -45,6 +46,12 @@ __device__ float3 operator*(const float &b, const float3 &a)
 __device__ float3 operator+(const float3 &a, const float3 &b)
 {
     return make_float3((a.x + b.x), (a.y + b.y), (a.z + b.z));
+}
+
+__device__ float getParticleDistance(float3 a, float3 b)
+{
+    float3 diff = a - b;
+    return sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
 }
 
 //-------------------------------------------------------------------------------
@@ -155,8 +162,7 @@ __global__ void saveParticleData(
     {
         const Particle &proton = protons[j];
 
-        float3 diff = electron.position - proton.position;
-        float distance = sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
+        float distance = getParticleDistance(electron.position, proton.position);
 
         if (distance < minDistance)
         {
@@ -225,6 +231,10 @@ int main(int argc, char **argv)
     // create two particle groups: one for electrons and one for protons
     std::vector<ParticleGroup> particleGroups(2);
 
+    // set up random number generator
+    std::mt19937 rng(std::random_device{}());
+    std::uniform_real_distribution<float> posRange(0.0f, 10.0f);
+
     // electron group
     particleGroups[0].numParticles = numParticlesPerGroup;
     particleGroups[0].particles.resize(numParticlesPerGroup);
@@ -232,9 +242,9 @@ int main(int argc, char **argv)
     {
         Particle &p = particleGroups[0].particles[i];
         p.id = i;
-        p.position = make_float3(rand() / (float)RAND_MAX * 10.0f * ANGSTROM,
-                                 rand() / (float)RAND_MAX * 10.0f * ANGSTROM,
-                                 rand() / (float)RAND_MAX * 10.0f * ANGSTROM);
+        p.position = make_float3(posRange(rng) * ANGSTROM,
+                                 posRange(rng) * ANGSTROM,
+                                 posRange(rng) * ANGSTROM);
         p.velocity = make_float3(0.0f, 0.0f, 0.0f);
         p.force = make_float3(0.0f, 0.0f, 0.0f);
         p.mass = 9.10938356e-31f; // electron mass (kg)
@@ -248,9 +258,9 @@ int main(int argc, char **argv)
     {
         Particle &p = particleGroups[1].particles[i];
         p.id = i;
-        p.position = make_float3(rand() / (float)RAND_MAX * 10.0f * ANGSTROM,
-                                 rand() / (float)RAND_MAX * 10.0f * ANGSTROM,
-                                 rand() / (float)RAND_MAX * 10.0f * ANGSTROM);
+        p.position = make_float3(posRange(rng) * ANGSTROM,
+                                 posRange(rng) * ANGSTROM,
+                                 posRange(rng) * ANGSTROM);
         p.velocity = make_float3(0.0f, 0.0f, 0.0f);
         p.force = make_float3(0.0f, 0.0f, 0.0f);
         p.mass = 1.6726219e-27f; // proton mass (kg)
