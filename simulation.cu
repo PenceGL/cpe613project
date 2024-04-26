@@ -48,10 +48,11 @@ __device__ float3 operator+(const float3 &a, const float3 &b)
     return make_float3((a.x + b.x), (a.y + b.y), (a.z + b.z));
 }
 
-__device__ float getParticleDistance(float3 a, float3 b)
+__device__ float
+getParticleDistance(float3 a, float3 b)
 {
     float3 diff = a - b;
-    return sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
+    return sqrt((diff.x * diff.x) + (diff.y * diff.y) + (diff.z * diff.z));
 }
 
 //-------------------------------------------------------------------------------
@@ -85,21 +86,19 @@ __global__ void calculateForces(
         float3 diff = q.position - p.position;
 
         // calculate distance (magnitude) between particles
-        float dist = sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
-
         // 1e-5f is added to dist to avoid division by zero
         // in case the particles are extremely close to each other
-        float invDist = 1.0f / (dist + 1e-5f);
+        float invDist = 1.0f / (getParticleDistance(q.position, p.position) + 1e-5f);
 
         // obtain the correct direction and magnitude of the acceleration vector
         // by using the cube of the inverse distance
         float invDist3 = invDist * invDist * invDist;
 
-        // gravitational force calculation
+        // calculate and accumulate gravitational force
         float force = p.mass * q.mass * invDist3;
         p.force = p.force + (diff * force);
 
-        // electrostatic force calculation (Coulomb's law)
+        // calculate and accumulate electrostatic force (Coulomb's law)
         float k = 8.99e9f;
         float forceElectrostatic = k * p.charge * q.charge * invDist3;
         p.force = p.force + (diff * forceElectrostatic);
@@ -109,16 +108,15 @@ __global__ void calculateForces(
     {
         Particle &q = otherParticles[i];
         float3 diff = q.position - p.position;
-        float dist = sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
-        float invDist = 1.0f / (dist + 1e-5f);
+        float invDist = 1.0f / (getParticleDistance(q.position, p.position) + 1e-5f);
         float invDist3 = invDist * invDist * invDist;
 
         float force = p.mass * q.mass * invDist3;
-        p.force = p.force + (diff * force);
+        q.force = q.force + (diff * force);
 
         float k = 8.99e9f;
         float forceElectrostatic = k * p.charge * q.charge * invDist3;
-        p.force = p.force + (diff * forceElectrostatic);
+        q.force = q.force + (diff * forceElectrostatic);
     }
 }
 
