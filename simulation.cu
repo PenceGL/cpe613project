@@ -7,13 +7,15 @@
 
 #include <cuda_runtime.h>
 #include "helper_cuda.h"
+#include "helper_math.h"
 
 #define BLOCK_SIZE 256
 #define MAX_FLOAT 3.402823466e+38f
 #define FEMTOSECOND 1e-15f // 1 femtosecond in seconds
 #define ANGSTROM 1e-10f    // 1 angstrom in meters
 #define ANGSTROMSQUARED 1e-20f
-#define COLOUMB 8.987551787e9f // Coulomb's constant (N⋅m^2/C^2)
+#define COLOUMB_CONSTANT 8.987551787e9f // Coulomb's constant (N⋅m^2/C^2)
+#define GRAVITY 6.67430e-11
 
 struct Particle
 {
@@ -24,22 +26,6 @@ struct Particle
     float mass;
     float charge;
 };
-
-// FLOAT3 OPERATOR OVERLOADS
-__device__ float3 operator-(const float3 &a, const float3 &b)
-{
-    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
-__device__ float3 operator*(const float3 &a, const float &b)
-{
-    return make_float3(a.x * b, a.y * b, a.z * b);
-}
-
-__device__ float3 operator+(const float3 &a, const float3 &b)
-{
-    return make_float3((a.x + b.x), (a.y + b.y), (a.z + b.z));
-}
 
 // ###############################################################################
 __global__ void calculateForces(
@@ -62,31 +48,20 @@ __global__ void calculateForces(
     {
         // obtain reference to each of the other particles
         Particle &other = otherParticles[i];
-        // calculate position difference between the two particles
-        float3 distance = other.position - target.position;
+        // calculate distance between the two particles
+        float3 distanceVector = other.position - target.position;
+        float distance = length(distanceVector);
+        // calculate the unit vector pointing between the objects
+        float3 forceDirection = distanceVector / distance;
 
-        // 1e-8f is added to dist to avoid division by zero
-        // in case the particles are extremely close to each other
-        float distanceSquared = (distance.x * distance.x) +
-                                (distance.y * distance.y) +
-                                (distance.z * distance.z) + 1e-8f;
+        // calculate gravitational force
+        // F = G * (m1 * m2) / (r^2)
+        float gravMagnitude = GRAVITY * (target.mass * other.mass) / (distance * distance);
+        target.force = forceDirection * gravMagnitude;
 
-        // calculate distance (magnitude) between particles
-        float invDist = 1.0f / sqrtf(distanceSquared);
-
-        // obtain the correct direction and magnitude of the acceleration vector
-        // by using the cube of the inverse distance
-        float invDist3 = invDist * invDist * invDist;
-
-        // calculate and accumulate gravitational force
-        float force = target.mass * other.mass * invDist3;
-        target.force = distance * force;
-
-        // calculate and accumulate electrostatic force
-        // convert from m^2 to angstrom^2
-        float forceElectrostatic = (COLOUMB * target.charge * other.charge) / (distanceSquared * ANGSTROMSQUARED);
-        // convert from N to kg⋅angstrom/s^2
-        target.force = distance * forceElectrostatic * ANGSTROM;
+        // calculate electrostatic force
+        float electroMagnitude = COLOUMB_CONSTANT * fabs(target.charge * other.charge) / (distance * distance);
+        target.force += forceDirection * electroMagnitude;
     }
 }
 
@@ -216,8 +191,8 @@ int main(int argc, char **argv)
                                  posRange(rng) * ANGSTROM);
         e.velocity = make_float3(0.0f, 0.0f, 0.0f);
         e.force = make_float3(0.0f, 0.0f, 0.0f);
-        e.mass = 9.10938356e-31f; // electron mass (kg)
-        e.charge = -1.0f;         // electron charge (atomic units)
+        e.mass = 9.10938356e-31f;    // electron mass (kg)
+        e.charge = -1.602176634e-19; // Charge of electron (Coulombs)
 
         std::cout << "Electron " << i << " initial position = "
                   << e.position.x << ", "
@@ -235,8 +210,8 @@ int main(int argc, char **argv)
                                  posRange(rng) * ANGSTROM);
         p.velocity = make_float3(0.0f, 0.0f, 0.0f);
         p.force = make_float3(0.0f, 0.0f, 0.0f);
-        p.mass = 1.6726219e-27f; // proton mass (kg)
-        p.charge = 1.0f;         // proton charge (atomic units)
+        p.mass = 1.6726219e-27f;    // proton mass (kg)
+        p.charge = 1.602176634e-19; // Charge of proton (Coulombs)
 
         std::cout << "Proton " << i << " initial position = "
                   << p.position.x << ", "
@@ -248,10 +223,8 @@ int main(int argc, char **argv)
     float distanceY = protons[0].position.y - electrons[0].position.y;
     float distanceZ = protons[0].position.z - electrons[0].position.z;
 
-    float distanceSquared = (distanceX * distanceX) +
-                            (distanceY * distanceY) +
-                            (distanceZ * distanceZ);
-    std::cout << "Initial distance between particles = "
+    float distanceSquared = pow(distanceX, 2) + pow(distanceY, 2) + pow(distanceZ, 2);
+    std::cout << "Initial distance between particles (X, Y, Z) = "
               << distanceX << ", "
               << distanceY << ", "
               << distanceZ << std::endl;
