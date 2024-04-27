@@ -89,11 +89,9 @@ __global__ void integrateParticles(
 
     Particle &target = particles[idx];
 
-    // update velocity as a factor of force on the particle over delta time
-    target.velocity = target.velocity + (target.force * (deltaTime / target.mass));
-
-    // update position as a factor of the particle velocity over delta time
-    target.position = target.position + (target.velocity * deltaTime);
+    float3 acceleration = target.force / target.mass;
+    target.velocity += (acceleration * deltaTime);
+    target.position += (target.velocity * deltaTime);
 }
 
 __global__ void saveParticleData(
@@ -242,16 +240,21 @@ int main(int argc, char **argv)
                   << p.position.z << std::endl;
     }
 
+    // float3 positionVector = electrons[0].position - protons[0].position;
+    // float3 velocityDirection = make_float3(-positionVector.y, positionVector.x, 0.0f);
+    // velocityDirection = normalize(velocityDirection);
+    // electrons[0].velocity = velocityDirection * (1.0f * ANGSTROM / FEMTOSECOND);
+
     float distanceX = protons[0].position.x - electrons[0].position.x;
     float distanceY = protons[0].position.y - electrons[0].position.y;
     float distanceZ = protons[0].position.z - electrons[0].position.z;
 
-    float distanceSquared = sqrt(pow(distanceX, 2) + pow(distanceY, 2) + pow(distanceZ, 2));
+    float distanceMagnitude = sqrt(pow(distanceX, 2) + pow(distanceY, 2) + pow(distanceZ, 2));
+    std::cout << "Initial distance between particles = " << distanceMagnitude << std::endl;
     std::cout << "Initial position difference between particles (X, Y, Z) = "
               << distanceX << ", "
               << distanceY << ", "
               << distanceZ << std::endl;
-    std::cout << "Initial distance between particles = " << distanceSquared << std::endl;
 
     // LOG FILE SETUP
     //-------------------------------------------------------------------------------
