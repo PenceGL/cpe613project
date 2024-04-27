@@ -60,10 +60,10 @@ __global__ void calculateForces(
     Particle *targetParticles,
     Particle *otherParticles,
     int numParticles,
-    int numOtherParticles,
     float deltaTime)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
     if (idx >= numParticles)
     {
         return;
@@ -125,14 +125,13 @@ __global__ void integrateParticles(
 __global__ void saveParticleData(
     const Particle *electrons,
     const Particle *protons,
-    int numElectrons,
-    int numProtons,
+    int numParticles,
     int step,
     float *distances,
     int *nearestProtonIds)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= numElectrons)
+    if (idx >= numParticles)
         return;
 
     const Particle &electron = electrons[idx];
@@ -140,7 +139,7 @@ __global__ void saveParticleData(
     float minDistance = MAX_FLOAT;
     int nearestProtonId = -1;
 
-    for (int j = 0; j < numProtons; ++j)
+    for (int j = 0; j < numParticles; ++j)
     {
         const Particle &proton = protons[j];
 
@@ -218,7 +217,7 @@ int main(int argc, char **argv)
     std::uniform_real_distribution<float> posRange(0.0f, 10.0f);
 
     // electron group
-    particleGroups[0].numParticles = numParticlesPerGroup;
+    numParticlesPerGroup = numParticlesPerGroup;
     particleGroups[0].particles.resize(numParticlesPerGroup);
     for (int i = 0; i < numParticlesPerGroup; ++i)
     {
@@ -234,7 +233,7 @@ int main(int argc, char **argv)
     }
 
     // proton group
-    particleGroups[1].numParticles = numParticlesPerGroup;
+    numParticlesPerGroup = numParticlesPerGroup;
     particleGroups[1].particles.resize(numParticlesPerGroup);
     for (int i = 0; i < numParticlesPerGroup; ++i)
     {
@@ -264,75 +263,69 @@ int main(int argc, char **argv)
     // allocate device memory for particle groups
     Particle *d_electrons;
     Particle *d_protons;
-    cudaMalloc(&d_electrons, particleGroups[0].numParticles * sizeof(Particle));
-    cudaMalloc(&d_protons, particleGroups[1].numParticles * sizeof(Particle));
+    cudaMalloc(&d_electrons, numParticlesPerGroup * sizeof(Particle));
+    cudaMalloc(&d_protons, numParticlesPerGroup * sizeof(Particle));
 
     // copy particle data from host to device
-    cudaMemcpy(d_electrons, particleGroups[0].particles.data(), particleGroups[0].numParticles * sizeof(Particle), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_protons, particleGroups[1].particles.data(), particleGroups[1].numParticles * sizeof(Particle), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_electrons, particleGroups[0].particles.data(), numParticlesPerGroup * sizeof(Particle), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_protons, particleGroups[1].particles.data(), numParticlesPerGroup * sizeof(Particle), cudaMemcpyHostToDevice);
 
     // allocate device memory for output arrays
     float *d_distances;
     int *d_nearestProtonIds;
-    cudaMalloc(&d_distances, particleGroups[0].numParticles * sizeof(float));
-    cudaMalloc(&d_nearestProtonIds, particleGroups[0].numParticles * sizeof(int));
+    cudaMalloc(&d_distances, numParticlesPerGroup * sizeof(float));
+    cudaMalloc(&d_nearestProtonIds, numParticlesPerGroup * sizeof(int));
 
     // SIMULATION LOOP
     //-------------------------------------------------------------------------------
     std::cout << "Launching simulation..." << std::endl;
 
-    int numParticles = particleGroups[0].numParticles;
-    int numOtherParticles = particleGroups[1].numParticles;
-
     int blockDim = BLOCK_SIZE;
-    int gridDim = (numParticles + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    int gridDim = (numParticlesPerGroup + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
     for (int step = 0; step < numSteps; ++step)
     {
         calculateForces<<<gridDim, blockDim>>>(
             d_electrons,
             d_protons,
-            numParticles,
-            numOtherParticles,
+            numParticlesPerGroup,
             deltaTime);
 
         calculateForces<<<gridDim, blockDim>>>(
             d_protons,
             d_electrons,
-            numParticles,
-            numOtherParticles,
+            numParticlesPerGroup,
             deltaTime);
 
         integrateParticles<<<gridDim, blockDim>>>(
             d_electrons,
-            numParticles,
+            numParticlesPerGroup,
             deltaTime);
 
         integrateParticles<<<gridDim, blockDim>>>(
-            d_electrons,
-            numParticles,
+            d_protons,
+            numParticlesPerGroup,
             deltaTime);
 
         if (step % logInterval == 0)
         {
             // launch the saveParticleData kernel
-            saveParticleData<<<(particleGroups[0].numParticles + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
+            saveParticleData<<<gridDim, blockDim>>>(
                 d_electrons,
                 d_protons,
-                particleGroups[0].numParticles,
-                particleGroups[1].numParticles,
+                numParticlesPerGroup,
                 step,
                 d_distances,
                 d_nearestProtonIds);
 
             // copy the output arrays from device to host
-            std::vector<float> distances(particleGroups[0].numParticles);
-            std::vector<int> nearestProtonIds(particleGroups[0].numParticles);
-            cudaMemcpy(distances.data(), d_distances, particleGroups[0].numParticles * sizeof(float), cudaMemcpyDeviceToHost);
-            cudaMemcpy(nearestProtonIds.data(), d_nearestProtonIds, particleGroups[0].numParticles * sizeof(int), cudaMemcpyDeviceToHost);
+            std::vector<float> distances(numParticlesPerGroup);
+            std::vector<int> nearestProtonIds(numParticlesPerGroup);
+            cudaMemcpy(distances.data(), d_distances, numParticlesPerGroup * sizeof(float), cudaMemcpyDeviceToHost);
+            cudaMemcpy(nearestProtonIds.data(), d_nearestProtonIds, numParticlesPerGroup * sizeof(int), cudaMemcpyDeviceToHost);
 
             // write the data to the log file
-            for (int i = 0; i < particleGroups[0].numParticles; ++i)
+            for (int i = 0; i < numParticlesPerGroup; ++i)
             {
                 const Particle &electron = particleGroups[0].particles[i];
                 const Particle &proton = particleGroups[1].particles[nearestProtonIds[i]];
@@ -346,8 +339,8 @@ int main(int argc, char **argv)
     }
 
     // copy updated particle data from device to host
-    cudaMemcpy(particleGroups[0].particles.data(), d_electrons, particleGroups[0].numParticles * sizeof(Particle), cudaMemcpyDeviceToHost);
-    cudaMemcpy(particleGroups[1].particles.data(), d_protons, particleGroups[1].numParticles * sizeof(Particle), cudaMemcpyDeviceToHost);
+    cudaMemcpy(particleGroups[0].particles.data(), d_electrons, numParticlesPerGroup * sizeof(Particle), cudaMemcpyDeviceToHost);
+    cudaMemcpy(particleGroups[1].particles.data(), d_protons, numParticlesPerGroup * sizeof(Particle), cudaMemcpyDeviceToHost);
 
     // SIMULATION TEARDOWN
     //-------------------------------------------------------------------------------
