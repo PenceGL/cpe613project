@@ -61,7 +61,16 @@ __global__ void calculateForces(
 
         // calculate electrostatic force
         float electroMagnitude = COLOUMB_CONSTANT * fabs(target.charge * other.charge) / (distance * distance);
-        target.force += forceDirection * electroMagnitude;
+        if (target.charge * other.charge < 0)
+        {
+            // attractive force
+            target.force -= forceDirection * electroMagnitude;
+        }
+        else
+        {
+            // repulsive force
+            target.force += forceDirection * electroMagnitude;
+        }
     }
 }
 
@@ -107,14 +116,12 @@ __global__ void saveParticleData(
     {
         const Particle &proton = protons[j];
 
-        float3 distance = proton.position - electron.position;
-        float distanceSquared = (distance.x * distance.x) +
-                                (distance.y * distance.y) +
-                                (distance.z * distance.z);
+        // calculate distance between the two particles
+        float distance = length(proton.position - electron.position);
 
-        if (distanceSquared < minDistance)
+        if (distance < minDistance)
         {
-            minDistance = distanceSquared;
+            minDistance = distance;
             nearestProtonId = proton.id;
         }
     }
