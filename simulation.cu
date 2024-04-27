@@ -41,7 +41,6 @@ __global__ void calculateForces(
         return;
     }
 
-    // update forces for the target particle group
     Particle &target = targetParticles[idx];
     target.force = make_float3(0.0f, 0.0f, 0.0f);
 
@@ -49,6 +48,7 @@ __global__ void calculateForces(
     {
         // obtain reference to each of the other particles
         Particle &other = otherParticles[i];
+
         // calculate distance between the two particles
         float3 distanceVector = other.position - target.position;
         float distance = length(distanceVector);
@@ -58,19 +58,21 @@ __global__ void calculateForces(
         // calculate gravitational force
         // F = G * (m1 * m2) / (r^2)
         float gravMagnitude = GRAVITY * (target.mass * other.mass) / (distance * distance);
-        target.force = forceDirection * gravMagnitude;
-
         // calculate electrostatic force
         float electroMagnitude = COLOUMB_CONSTANT * fabs(target.charge * other.charge) / (distance * distance);
+        float3 force = forceDirection * (gravMagnitude + electroMagnitude);
+
         if (target.charge * other.charge < 0)
         {
             // attractive force
-            target.force -= forceDirection * electroMagnitude;
+            target.force -= force;
+            other.force += force;
         }
         else
         {
             // repulsive force
-            target.force += forceDirection * electroMagnitude;
+            target.force += force;
+            other.force -= force;
         }
     }
 }
