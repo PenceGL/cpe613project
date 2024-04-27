@@ -43,6 +43,7 @@ __global__ void calculateForces(
 
     // update forces for the target particle group
     Particle &target = targetParticles[idx];
+    target.force = make_float3(0.0f, 0.0f, 0.0f);
 
     for (int i{0}; i < numParticles; ++i)
     {
@@ -86,12 +87,10 @@ __global__ void integrateParticles(
 
     Particle &target = particles[idx];
 
-    // update velocity
-    // affected by force on the particle over delta time
+    // update velocity as a factor of force on the particle over delta time
     target.velocity = target.velocity + (target.force * (deltaTime / target.mass));
 
-    // update position
-    // affected by the velocity over the delta time
+    // update position as a factor of the particle velocity over delta time
     target.position = target.position + (target.velocity * deltaTime);
 }
 
@@ -134,7 +133,6 @@ int main(int argc, char **argv)
 {
     // SIMULATION CONFIGURATION VALUES
     //-------------------------------------------------------------------------------
-    int numGroups = 2; // hardcoded number of groups for now
     int numParticlesPerGroup = 0;
     int numSteps = 0;
     float deltaTime = 0.0;
@@ -172,8 +170,7 @@ int main(int argc, char **argv)
 
     std::cout << "Configuration received:" << std::endl;
     std::cout << "-----------------------------------------------------------" << std::endl;
-    std::cout << "\tNumber of groups = " << numGroups << std::endl;
-    std::cout << "\tParticles per group = " << numParticlesPerGroup << std::endl;
+    std::cout << "\tNumber of particles = " << numParticlesPerGroup << std::endl;
     std::cout << "\tNumber of steps = " << numSteps << std::endl;
     std::cout << "\tDelta time per step = " << deltaTime << "femtoseconds" << std::endl;
     std::cout << "-----------------------------------------------------------" << std::endl;
@@ -186,18 +183,28 @@ int main(int argc, char **argv)
 
     // random number generator
     std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<float> posRange(0.0f, 10.0f);
+    std::uniform_real_distribution<float> posRange(0.0f, 0.1f);
+    std::uniform_real_distribution<float> velRange(-0.01f, 0.01f);
+
+    const float BOHR_RADIUS = 0.529177f * ANGSTROM;
 
     electrons.resize(numParticlesPerGroup);
     for (int i{0}; i < numParticlesPerGroup; ++i)
     {
         Particle &e = electrons[i];
         e.id = i;
-        e.position = make_float3(posRange(rng) * ANGSTROM,
-                                 posRange(rng) * ANGSTROM,
-                                 posRange(rng) * ANGSTROM);
+        // e.position = make_float3(posRange(rng) * ANGSTROM,
+        //                          posRange(rng) * ANGSTROM,
+        //                          posRange(rng) * ANGSTROM);
+        // e.velocity = make_float3(velRange(rng) * ANGSTROM / FEMTOSECOND,
+        //                          velRange(rng) * ANGSTROM / FEMTOSECOND,
+        //                          velRange(rng) * ANGSTROM / FEMTOSECOND);
+        // e.force = make_float3(0.0f, 0.0f, 0.0f);
+
+        e.position = make_float3(BOHR_RADIUS, 0.0f, 0.0f);
         e.velocity = make_float3(0.0f, 0.0f, 0.0f);
         e.force = make_float3(0.0f, 0.0f, 0.0f);
+
         e.mass = 9.10938356e-31f;    // electron mass (kg)
         e.charge = -1.602176634e-19; // Charge of electron (Coulombs)
 
@@ -212,11 +219,18 @@ int main(int argc, char **argv)
     {
         Particle &p = protons[i];
         p.id = i;
-        p.position = make_float3(posRange(rng) * ANGSTROM,
-                                 posRange(rng) * ANGSTROM,
-                                 posRange(rng) * ANGSTROM);
+        // p.position = make_float3(posRange(rng) * ANGSTROM,
+        //                          posRange(rng) * ANGSTROM,
+        //                          posRange(rng) * ANGSTROM);
+        // p.velocity = make_float3(velRange(rng) * ANGSTROM / FEMTOSECOND,
+        //                          velRange(rng) * ANGSTROM / FEMTOSECOND,
+        //                          velRange(rng) * ANGSTROM / FEMTOSECOND);
+        // p.force = make_float3(0.0f, 0.0f, 0.0f);
+
+        p.position = make_float3(0.0f, 0.0f, 0.0f);
         p.velocity = make_float3(0.0f, 0.0f, 0.0f);
         p.force = make_float3(0.0f, 0.0f, 0.0f);
+
         p.mass = 1.6726219e-27f;    // proton mass (kg)
         p.charge = 1.602176634e-19; // Charge of proton (Coulombs)
 
@@ -230,12 +244,12 @@ int main(int argc, char **argv)
     float distanceY = protons[0].position.y - electrons[0].position.y;
     float distanceZ = protons[0].position.z - electrons[0].position.z;
 
-    float distanceSquared = pow(distanceX, 2) + pow(distanceY, 2) + pow(distanceZ, 2);
-    std::cout << "Initial distance between particles (X, Y, Z) = "
+    float distanceSquared = sqrt(pow(distanceX, 2) + pow(distanceY, 2) + pow(distanceZ, 2));
+    std::cout << "Initial position difference between particles (X, Y, Z) = "
               << distanceX << ", "
               << distanceY << ", "
               << distanceZ << std::endl;
-    std::cout << "Initial distance squared between particles = " << distanceSquared << std::endl;
+    std::cout << "Initial distance between particles = " << distanceSquared << std::endl;
 
     // LOG FILE SETUP
     //-------------------------------------------------------------------------------
@@ -246,6 +260,10 @@ int main(int argc, char **argv)
     std::cout << "Creating log file: " << log_name << std::endl;
     std::ofstream file(log_name);
     file << "Step,ElectronID,NearestProtonID,Distance,ElectronPosX,ElectronPosY,ElectronPosZ,NearestProtonPosX,NearestProtonPosY,NearestProtonPosZ\n";
+
+    // vectors that will be used to store distances between particles and the nearest proton for a given electron
+    std::vector<float> distances(numParticlesPerGroup);
+    std::vector<int> nearestProtonIds(numParticlesPerGroup);
 
     // DEVICE MEMORY SETUP
     //-------------------------------------------------------------------------------
@@ -274,6 +292,33 @@ int main(int argc, char **argv)
 
     for (int step = 0; step < numSteps; ++step)
     {
+        // launch the saveParticleData kernel at log intervals
+        if (step % logInterval == 0)
+        {
+            saveParticleData<<<gridDim, blockDim>>>(
+                d_electrons,
+                d_protons,
+                numParticlesPerGroup,
+                step,
+                d_distances,
+                d_nearestProtonIds);
+
+            checkCudaErrors(cudaMemcpy(distances.data(), d_distances, numParticlesPerGroup * sizeof(float), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(nearestProtonIds.data(), d_nearestProtonIds, numParticlesPerGroup * sizeof(int), cudaMemcpyDeviceToHost));
+
+            // write the data to the log file
+            for (int i{0}; i < numParticlesPerGroup; ++i)
+            {
+                const Particle &electron = electrons[i];
+                const Particle &proton = protons[nearestProtonIds[i]];
+
+                file << step << "," << electron.id << "," << proton.id << ","
+                     << distances[i] << ","
+                     << electron.position.x << "," << electron.position.y << "," << electron.position.z << ","
+                     << proton.position.x << "," << proton.position.y << "," << proton.position.z << "\n";
+            }
+        }
+
         calculateForces<<<gridDim, blockDim>>>(
             d_electrons,
             d_protons,
@@ -302,40 +347,14 @@ int main(int argc, char **argv)
         // integrate all particles prior to logging
         checkCudaErrors(cudaDeviceSynchronize());
 
-        // launch the saveParticleData kernel at log intervals
-        if (step % logInterval == 0)
-        {
-            saveParticleData<<<gridDim, blockDim>>>(
-                d_electrons,
-                d_protons,
-                numParticlesPerGroup,
-                step,
-                d_distances,
-                d_nearestProtonIds);
-
-            // copy the output arrays from device to host
-            std::vector<float> distances(numParticlesPerGroup);
-            std::vector<int> nearestProtonIds(numParticlesPerGroup);
-
-            checkCudaErrors(cudaMemcpy(distances.data(), d_distances, numParticlesPerGroup * sizeof(float), cudaMemcpyDeviceToHost));
-            checkCudaErrors(cudaMemcpy(nearestProtonIds.data(), d_nearestProtonIds, numParticlesPerGroup * sizeof(int), cudaMemcpyDeviceToHost));
-
-            // write the data to the log file
-            for (int i{0}; i < numParticlesPerGroup; ++i)
-            {
-                const Particle &electron = electrons[i];
-                const Particle &proton = protons[nearestProtonIds[i]];
-
-                file << step << "," << electron.id << "," << proton.id << ","
-                     << distances[i] << ","
-                     << electron.position.x << "," << electron.position.y << "," << electron.position.z << ","
-                     << proton.position.x << "," << proton.position.y << "," << proton.position.z << "\n";
-            }
-        }
+        // copy the updated particle data back to the host after integrating
+        checkCudaErrors(cudaMemcpy(electrons.data(), d_electrons, numParticlesPerGroup * sizeof(Particle), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(protons.data(), d_protons, numParticlesPerGroup * sizeof(Particle), cudaMemcpyDeviceToHost));
     }
 
     // SIMULATION TEARDOWN
     //-------------------------------------------------------------------------------
+    file.close();
     // free device memory
     checkCudaErrors(cudaFree(d_electrons));
     checkCudaErrors(cudaFree(d_protons));
