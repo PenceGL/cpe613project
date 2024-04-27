@@ -9,7 +9,11 @@
 #include "helper_cuda.h"
 
 #define BLOCK_SIZE 256
-#define MAX_FLOAT 3.402823466e+38f;
+#define MAX_FLOAT 3.402823466e+38f
+#define FEMTOSECOND 1e-15f // 1 femtosecond in seconds
+#define ANGSTROM 1e-10f    // 1 angstrom in meters
+#define ANGSTROMSQUARED 1e-20f
+#define COLOUMB 8.987551787e9f // Coulomb's constant (N⋅m^2/C^2)
 
 struct Particle
 {
@@ -19,12 +23,6 @@ struct Particle
     float3 force;
     float mass;
     float charge;
-};
-
-struct ParticleGroup
-{
-    std::vector<Particle> particles;
-    int numParticles;
 };
 
 // FLOAT3 OPERATOR OVERLOADS
@@ -91,10 +89,11 @@ __global__ void calculateForces(
         float force = target.mass * other.mass * invDist3;
         target.force = target.force + (distance * force);
 
-        // calculate and accumulate electrostatic force (Coulomb's law)
-        float k = 8.987e9f;
-        float forceElectrostatic = k * target.charge * other.charge * invDist3;
-        target.force = target.force + (distance * forceElectrostatic);
+        // calculate and accumulate electrostatic force
+        // convert from m^2 to angstrom^2
+        float forceElectrostatic = (COLOUMB * target.charge * other.charge) / (distanceSquared * ANGSTROMSQUARED);
+        // convert from N to kg⋅angstrom/s^2
+        target.force = target.force + (distance * forceElectrostatic * ANGSTROM);
     }
 }
 
@@ -158,9 +157,6 @@ __global__ void saveParticleData(
 
 int main(int argc, char **argv)
 {
-    const float FEMTOSECOND = 1e-15f; // 1 femtosecond in seconds
-    const float ANGSTROM = 1e-10f;    // 1 angstrom in meters
-
     // SIMULATION CONFIGURATION VALUES
     //-------------------------------------------------------------------------------
     int numGroups = 2; // hardcoded number of groups for now
@@ -192,9 +188,9 @@ int main(int argc, char **argv)
     }
 
     deltaTime = std::stof(argv[3]);
-    if (deltaTime < 0.1)
+    if (deltaTime < 0.001)
     {
-        deltaTime = 0.1;
+        deltaTime = 0.001;
     }
     // convert delta time to femtoseconds
     deltaTime *= FEMTOSECOND;
@@ -210,32 +206,36 @@ int main(int argc, char **argv)
     // PARTICLE CONFIGURATION
     //-------------------------------------------------------------------------------
     // create two particle groups: one for electrons and one for protons
-    std::vector<ParticleGroup> particleGroups(2);
+    std::vector<Particle> electrons;
+    std::vector<Particle> protons;
 
     // random number generator
     std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<float> posRange(0.0f, 10.0f);
 
-    // electron group
-    particleGroups[0].particles.resize(numParticlesPerGroup);
-    for (int i = 0; i < numParticlesPerGroup; ++i)
+    electrons.resize(numParticlesPerGroup);
+    for (int i{0}; i < numParticlesPerGroup; ++i)
     {
-        Particle &p = particleGroups[0].particles[i];
-        p.id = i;
-        p.position = make_float3(posRange(rng) * ANGSTROM,
+        Particle &e = electrons[i];
+        e.id = i;
+        e.position = make_float3(posRange(rng) * ANGSTROM,
                                  posRange(rng) * ANGSTROM,
                                  posRange(rng) * ANGSTROM);
-        p.velocity = make_float3(0.0f, 0.0f, 0.0f);
-        p.force = make_float3(0.0f, 0.0f, 0.0f);
-        p.mass = 9.10938356e-31f; // electron mass (kg)
-        p.charge = -1.0f;         // electron charge (atomic units)
+        e.velocity = make_float3(0.0f, 0.0f, 0.0f);
+        e.force = make_float3(0.0f, 0.0f, 0.0f);
+        e.mass = 9.10938356e-31f; // electron mass (kg)
+        e.charge = -1.0f;         // electron charge (atomic units)
+
+        std::cout << "Electron " << i << " initial position = "
+                  << e.position.x << ", "
+                  << e.position.y << ", "
+                  << e.position.z << std::endl;
     }
 
-    // proton group
-    particleGroups[1].particles.resize(numParticlesPerGroup);
-    for (int i = 0; i < numParticlesPerGroup; ++i)
+    protons.resize(numParticlesPerGroup);
+    for (int i{0}; i < numParticlesPerGroup; ++i)
     {
-        Particle &p = particleGroups[1].particles[i];
+        Particle &p = protons[i];
         p.id = i;
         p.position = make_float3(posRange(rng) * ANGSTROM,
                                  posRange(rng) * ANGSTROM,
@@ -244,7 +244,25 @@ int main(int argc, char **argv)
         p.force = make_float3(0.0f, 0.0f, 0.0f);
         p.mass = 1.6726219e-27f; // proton mass (kg)
         p.charge = 1.0f;         // proton charge (atomic units)
+
+        std::cout << "Proton " << i << " initial position = "
+                  << p.position.x << ", "
+                  << p.position.y << ", "
+                  << p.position.z << std::endl;
     }
+
+    float distanceX = protons[0].position.x - electrons[0].position.x;
+    float distanceY = protons[0].position.y - electrons[0].position.y;
+    float distanceZ = protons[0].position.z - electrons[0].position.z;
+
+    float distanceSquared = (distanceX * distanceX) +
+                            (distanceY * distanceY) +
+                            (distanceZ * distanceZ);
+    std::cout << "Initial distance between particles = "
+              << distanceX << ", "
+              << distanceY << ", "
+              << distanceZ << std::endl;
+    std::cout << "Initial distance squared between particles = " << distanceSquared << std::endl;
 
     // LOG FILE SETUP
     //-------------------------------------------------------------------------------
@@ -261,18 +279,18 @@ int main(int argc, char **argv)
     // allocate device memory for particle groups
     Particle *d_electrons;
     Particle *d_protons;
-    cudaMalloc(&d_electrons, numParticlesPerGroup * sizeof(Particle));
-    cudaMalloc(&d_protons, numParticlesPerGroup * sizeof(Particle));
+    checkCudaErrors(cudaMalloc(&d_electrons, numParticlesPerGroup * sizeof(Particle)));
+    checkCudaErrors(cudaMalloc(&d_protons, numParticlesPerGroup * sizeof(Particle)));
 
     // copy particle data from host to device
-    cudaMemcpy(d_electrons, particleGroups[0].particles.data(), numParticlesPerGroup * sizeof(Particle), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_protons, particleGroups[1].particles.data(), numParticlesPerGroup * sizeof(Particle), cudaMemcpyHostToDevice);
+    checkCudaErrors(cudaMemcpy(d_electrons, electrons.data(), numParticlesPerGroup * sizeof(Particle), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_protons, protons.data(), numParticlesPerGroup * sizeof(Particle), cudaMemcpyHostToDevice));
 
     // allocate device memory for output arrays
     float *d_distances;
     int *d_nearestProtonIds;
-    cudaMalloc(&d_distances, numParticlesPerGroup * sizeof(float));
-    cudaMalloc(&d_nearestProtonIds, numParticlesPerGroup * sizeof(int));
+    checkCudaErrors(cudaMalloc(&d_distances, numParticlesPerGroup * sizeof(float)));
+    checkCudaErrors(cudaMalloc(&d_nearestProtonIds, numParticlesPerGroup * sizeof(int)));
 
     // SIMULATION LOOP
     //-------------------------------------------------------------------------------
@@ -305,9 +323,9 @@ int main(int argc, char **argv)
             numParticlesPerGroup,
             deltaTime);
 
+        // launch the saveParticleData kernel at log intervals
         if (step % logInterval == 0)
         {
-            // launch the saveParticleData kernel
             saveParticleData<<<gridDim, blockDim>>>(
                 d_electrons,
                 d_protons,
@@ -319,14 +337,15 @@ int main(int argc, char **argv)
             // copy the output arrays from device to host
             std::vector<float> distances(numParticlesPerGroup);
             std::vector<int> nearestProtonIds(numParticlesPerGroup);
-            cudaMemcpy(distances.data(), d_distances, numParticlesPerGroup * sizeof(float), cudaMemcpyDeviceToHost);
-            cudaMemcpy(nearestProtonIds.data(), d_nearestProtonIds, numParticlesPerGroup * sizeof(int), cudaMemcpyDeviceToHost);
+
+            checkCudaErrors(cudaMemcpy(distances.data(), d_distances, numParticlesPerGroup * sizeof(float), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(nearestProtonIds.data(), d_nearestProtonIds, numParticlesPerGroup * sizeof(int), cudaMemcpyDeviceToHost));
 
             // write the data to the log file
-            for (int i = 0; i < numParticlesPerGroup; ++i)
+            for (int i{0}; i < numParticlesPerGroup; ++i)
             {
-                const Particle &electron = particleGroups[0].particles[i];
-                const Particle &proton = particleGroups[1].particles[nearestProtonIds[i]];
+                const Particle &electron = electrons[i];
+                const Particle &proton = protons[nearestProtonIds[i]];
 
                 file << step << "," << electron.id << "," << proton.id << ","
                      << distances[i] << ","
@@ -336,17 +355,13 @@ int main(int argc, char **argv)
         }
     }
 
-    // copy updated particle data from device to host
-    cudaMemcpy(particleGroups[0].particles.data(), d_electrons, numParticlesPerGroup * sizeof(Particle), cudaMemcpyDeviceToHost);
-    cudaMemcpy(particleGroups[1].particles.data(), d_protons, numParticlesPerGroup * sizeof(Particle), cudaMemcpyDeviceToHost);
-
     // SIMULATION TEARDOWN
     //-------------------------------------------------------------------------------
     // free device memory
-    cudaFree(d_electrons);
-    cudaFree(d_protons);
-    cudaFree(d_distances);
-    cudaFree(d_nearestProtonIds);
+    checkCudaErrors(cudaFree(d_electrons));
+    checkCudaErrors(cudaFree(d_protons));
+    checkCudaErrors(cudaFree(d_distances));
+    checkCudaErrors(cudaFree(d_nearestProtonIds));
 
     std::cout << "Simulation completed successfully." << std::endl;
     return 0;
