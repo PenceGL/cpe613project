@@ -36,17 +36,12 @@ __device__ float3 operator*(const float3 &a, const float &b)
     return make_float3(a.x * b, a.y * b, a.z * b);
 }
 
-__device__ float3 operator*(const float &b, const float3 &a)
-{
-    return make_float3(a.x * b, a.y * b, a.z * b);
-}
-
 __device__ float3 operator+(const float3 &a, const float3 &b)
 {
     return make_float3((a.x + b.x), (a.y + b.y), (a.z + b.z));
 }
 
-//-------------------------------------------------------------------------------
+// ###############################################################################
 __global__ void calculateForces(
     Particle *targetParticles,
     Particle *otherParticles,
@@ -62,8 +57,6 @@ __global__ void calculateForces(
 
     // update forces for the target particle group
     Particle &target = targetParticles[idx];
-    // the force on each particle is newly calculated on every time step
-    target.force = make_float3(0.0f, 0.0f, 0.0f);
 
     for (int i{0}; i < numParticles; ++i)
     {
@@ -87,13 +80,13 @@ __global__ void calculateForces(
 
         // calculate and accumulate gravitational force
         float force = target.mass * other.mass * invDist3;
-        target.force = target.force + (distance * force);
+        target.force = distance * force;
 
         // calculate and accumulate electrostatic force
         // convert from m^2 to angstrom^2
         float forceElectrostatic = (COLOUMB * target.charge * other.charge) / (distanceSquared * ANGSTROMSQUARED);
         // convert from N to kg⋅angstrom/s^2
-        target.force = target.force + (distance * forceElectrostatic * ANGSTROM);
+        target.force = distance * forceElectrostatic * ANGSTROM;
     }
 }
 
@@ -313,6 +306,9 @@ int main(int argc, char **argv)
             numParticlesPerGroup,
             deltaTime);
 
+        // calculate all forces prior to integrating
+        checkCudaErrors(cudaDeviceSynchronize());
+
         integrateParticles<<<gridDim, blockDim>>>(
             d_electrons,
             numParticlesPerGroup,
@@ -322,6 +318,9 @@ int main(int argc, char **argv)
             d_protons,
             numParticlesPerGroup,
             deltaTime);
+
+        // integrate all particles prior to logging
+        checkCudaErrors(cudaDeviceSynchronize());
 
         // launch the saveParticleData kernel at log intervals
         if (step % logInterval == 0)
