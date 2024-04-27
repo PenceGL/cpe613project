@@ -57,7 +57,7 @@ getParticleDistance(float3 a, float3 b)
 
 //-------------------------------------------------------------------------------
 __global__ void calculateForces(
-    Particle *particles,
+    Particle *targetParticles,
     Particle *otherParticles,
     int numParticles,
     int numOtherParticles,
@@ -69,54 +69,35 @@ __global__ void calculateForces(
         return;
     }
 
-    Particle &p = particles[idx];
-    p.force = make_float3(0.0f, 0.0f, 0.0f);
+    // update forces for the target particle group
+    Particle &target = targetParticles[idx];
+    // the force on each particle is newly calculated on every time step
+    target.force = make_float3(0.0f, 0.0f, 0.0f);
 
-    for (int i = 0; i < numParticles; ++i)
+    for (int i{0}; i < numParticles; ++i)
     {
-        if (i == idx)
-        {
-            // skip making the particle interact with itself
-            continue;
-        }
-
-        // obtain reference to other particles
-        Particle &q = particles[i];
+        // obtain reference to each of the other particles
+        Particle &other = otherParticles[i];
         // calculate position difference between the two particles
-        float3 diff = q.position - p.position;
+        float3 diff = target.position - other.position;
 
         // calculate distance (magnitude) between particles
-        // 1e-5f is added to dist to avoid division by zero
+        // 1e-8f is added to dist to avoid division by zero
         // in case the particles are extremely close to each other
-        float invDist = 1.0f / (getParticleDistance(q.position, p.position) + 1e-5f);
+        float invDist = 1.0f / (getParticleDistance(target.position, other.position) + 1e-8f);
 
         // obtain the correct direction and magnitude of the acceleration vector
         // by using the cube of the inverse distance
         float invDist3 = invDist * invDist * invDist;
 
         // calculate and accumulate gravitational force
-        float force = p.mass * q.mass * invDist3;
-        p.force = p.force + (diff * force);
+        float force = target.mass * other.mass * invDist3;
+        target.force = target.force + (diff * force);
 
         // calculate and accumulate electrostatic force (Coulomb's law)
-        float k = 8.99e9f;
-        float forceElectrostatic = k * p.charge * q.charge * invDist3;
-        p.force = p.force + (diff * forceElectrostatic);
-    }
-
-    for (int i = 0; i < numOtherParticles; ++i)
-    {
-        Particle &q = otherParticles[i];
-        float3 diff = q.position - p.position;
-        float invDist = 1.0f / (getParticleDistance(q.position, p.position) + 1e-5f);
-        float invDist3 = invDist * invDist * invDist;
-
-        float force = p.mass * q.mass * invDist3;
-        q.force = q.force + (diff * force);
-
-        float k = 8.99e9f;
-        float forceElectrostatic = k * p.charge * q.charge * invDist3;
-        q.force = q.force + (diff * forceElectrostatic);
+        float k = 8.987e9f;
+        float forceElectrostatic = k * target.charge * other.charge * invDist3;
+        target.force = target.force + (diff * forceElectrostatic);
     }
 }
 
@@ -126,16 +107,19 @@ __global__ void integrateParticles(
     float deltaTime)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
     if (idx >= numParticles)
         return;
 
-    Particle &p = particles[idx];
+    Particle &target = particles[idx];
 
-    // Update velocity
-    p.velocity = p.velocity + (p.force * (deltaTime / p.mass));
+    // update velocity
+    // affected by force on the particle over delta time
+    target.velocity = target.velocity + (target.force * (deltaTime / target.mass));
 
-    // Update position
-    p.position = p.position + (p.velocity * deltaTime);
+    // update position
+    // affected by the velocity over the delta time
+    target.position = target.position + (target.velocity * deltaTime);
 }
 
 __global__ void saveParticleData(
@@ -196,9 +180,9 @@ int main(int argc, char **argv)
 
     numParticlesPerGroup = std::stoi(argv[1]);
     // enforce a minimum number of particles
-    if (numParticlesPerGroup < 50)
+    if (numParticlesPerGroup < 20)
     {
-        numParticlesPerGroup = 50;
+        numParticlesPerGroup = 20;
     }
 
     numSteps = std::stoi(argv[2]);
@@ -277,17 +261,17 @@ int main(int argc, char **argv)
 
     // DEVICE MEMORY SETUP
     //-------------------------------------------------------------------------------
-    // Allocate device memory for particle groups
+    // allocate device memory for particle groups
     Particle *d_electrons;
     Particle *d_protons;
     cudaMalloc(&d_electrons, particleGroups[0].numParticles * sizeof(Particle));
     cudaMalloc(&d_protons, particleGroups[1].numParticles * sizeof(Particle));
 
-    // Copy particle data from host to device
+    // copy particle data from host to device
     cudaMemcpy(d_electrons, particleGroups[0].particles.data(), particleGroups[0].numParticles * sizeof(Particle), cudaMemcpyHostToDevice);
     cudaMemcpy(d_protons, particleGroups[1].particles.data(), particleGroups[1].numParticles * sizeof(Particle), cudaMemcpyHostToDevice);
 
-    // Allocate device memory for output arrays
+    // allocate device memory for output arrays
     float *d_distances;
     int *d_nearestProtonIds;
     cudaMalloc(&d_distances, particleGroups[0].numParticles * sizeof(float));
@@ -297,30 +281,37 @@ int main(int argc, char **argv)
     //-------------------------------------------------------------------------------
     std::cout << "Launching simulation..." << std::endl;
 
+    int numParticles = particleGroups[0].numParticles;
+    int numOtherParticles = particleGroups[1].numParticles;
+
+    int blockDim = BLOCK_SIZE;
+    int gridDim = (numParticles + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
     for (int step = 0; step < numSteps; ++step)
     {
-        for (int group_num = 0; group_num < numGroups; ++group_num)
-        {
-            // swap focus of group data to ensure each group is focused for calculations
-            // on every time step
-            Particle *d_particles = (group_num == 0) ? d_electrons : d_protons;
-            Particle *d_otherParticles = (group_num == 0) ? d_protons : d_electrons;
+        calculateForces<<<gridDim, blockDim>>>(
+            d_electrons,
+            d_protons,
+            numParticles,
+            numOtherParticles,
+            deltaTime);
 
-            int numParticles = particleGroups[group_num].numParticles;
-            int numOtherParticles = particleGroups[1 - group_num].numParticles;
+        calculateForces<<<gridDim, blockDim>>>(
+            d_protons,
+            d_electrons,
+            numParticles,
+            numOtherParticles,
+            deltaTime);
 
-            calculateForces<<<(numParticles + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
-                d_particles,
-                d_otherParticles,
-                numParticles,
-                numOtherParticles,
-                deltaTime);
+        integrateParticles<<<gridDim, blockDim>>>(
+            d_electrons,
+            numParticles,
+            deltaTime);
 
-            integrateParticles<<<(numParticles + BLOCK_SIZE - 1) / BLOCK_SIZE, BLOCK_SIZE>>>(
-                d_particles,
-                numParticles,
-                deltaTime);
-        }
+        integrateParticles<<<gridDim, blockDim>>>(
+            d_electrons,
+            numParticles,
+            deltaTime);
 
         if (step % logInterval == 0)
         {
@@ -354,13 +345,13 @@ int main(int argc, char **argv)
         }
     }
 
-    // Copy updated particle data from device to host
+    // copy updated particle data from device to host
     cudaMemcpy(particleGroups[0].particles.data(), d_electrons, particleGroups[0].numParticles * sizeof(Particle), cudaMemcpyDeviceToHost);
     cudaMemcpy(particleGroups[1].particles.data(), d_protons, particleGroups[1].numParticles * sizeof(Particle), cudaMemcpyDeviceToHost);
 
     // SIMULATION TEARDOWN
     //-------------------------------------------------------------------------------
-    // Free device memory
+    // free device memory
     cudaFree(d_electrons);
     cudaFree(d_protons);
     cudaFree(d_distances);
