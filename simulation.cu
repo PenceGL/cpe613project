@@ -48,13 +48,6 @@ __device__ float3 operator+(const float3 &a, const float3 &b)
     return make_float3((a.x + b.x), (a.y + b.y), (a.z + b.z));
 }
 
-__device__ float
-getParticleDistance(float3 a, float3 b)
-{
-    float3 diff = a - b;
-    return sqrt((diff.x * diff.x) + (diff.y * diff.y) + (diff.z * diff.z));
-}
-
 //-------------------------------------------------------------------------------
 __global__ void calculateForces(
     Particle *targetParticles,
@@ -79,12 +72,16 @@ __global__ void calculateForces(
         // obtain reference to each of the other particles
         Particle &other = otherParticles[i];
         // calculate position difference between the two particles
-        float3 diff = target.position - other.position;
+        float3 distance = other.position - target.position;
 
-        // calculate distance (magnitude) between particles
         // 1e-8f is added to dist to avoid division by zero
         // in case the particles are extremely close to each other
-        float invDist = 1.0f / (getParticleDistance(target.position, other.position) + 1e-8f);
+        float distanceSquared = (distance.x * distance.x) +
+                                (distance.y * distance.y) +
+                                (distance.z * distance.z) + 1e-8f;
+
+        // calculate distance (magnitude) between particles
+        float invDist = 1.0f / sqrtf(distanceSquared);
 
         // obtain the correct direction and magnitude of the acceleration vector
         // by using the cube of the inverse distance
@@ -92,12 +89,12 @@ __global__ void calculateForces(
 
         // calculate and accumulate gravitational force
         float force = target.mass * other.mass * invDist3;
-        target.force = target.force + (diff * force);
+        target.force = target.force + (distance * force);
 
         // calculate and accumulate electrostatic force (Coulomb's law)
         float k = 8.987e9f;
         float forceElectrostatic = k * target.charge * other.charge * invDist3;
-        target.force = target.force + (diff * forceElectrostatic);
+        target.force = target.force + (distance * forceElectrostatic);
     }
 }
 
@@ -143,11 +140,14 @@ __global__ void saveParticleData(
     {
         const Particle &proton = protons[j];
 
-        float distance = getParticleDistance(electron.position, proton.position);
+        float3 distance = proton.position - electron.position;
+        float distanceSquared = (distance.x * distance.x) +
+                                (distance.y * distance.y) +
+                                (distance.z * distance.z);
 
-        if (distance < minDistance)
+        if (distanceSquared < minDistance)
         {
-            minDistance = distance;
+            minDistance = distanceSquared;
             nearestProtonId = proton.id;
         }
     }
@@ -178,10 +178,10 @@ int main(int argc, char **argv)
     }
 
     numParticlesPerGroup = std::stoi(argv[1]);
-    // enforce a minimum number of particles
-    if (numParticlesPerGroup < 20)
+    // enforce a minimum of at least one particle in each group
+    if (numParticlesPerGroup < 1)
     {
-        numParticlesPerGroup = 20;
+        numParticlesPerGroup = 1;
     }
 
     numSteps = std::stoi(argv[2]);
@@ -212,12 +212,11 @@ int main(int argc, char **argv)
     // create two particle groups: one for electrons and one for protons
     std::vector<ParticleGroup> particleGroups(2);
 
-    // set up random number generator
+    // random number generator
     std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<float> posRange(0.0f, 10.0f);
 
     // electron group
-    numParticlesPerGroup = numParticlesPerGroup;
     particleGroups[0].particles.resize(numParticlesPerGroup);
     for (int i = 0; i < numParticlesPerGroup; ++i)
     {
@@ -233,7 +232,6 @@ int main(int argc, char **argv)
     }
 
     // proton group
-    numParticlesPerGroup = numParticlesPerGroup;
     particleGroups[1].particles.resize(numParticlesPerGroup);
     for (int i = 0; i < numParticlesPerGroup; ++i)
     {
