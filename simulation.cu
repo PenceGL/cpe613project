@@ -4,6 +4,7 @@
 #include <vector>
 #include <fstream>
 #include <random>
+#include <iomanip> // for std::setprecision
 
 #include <cuda_runtime.h>
 #include "helper_cuda.h"
@@ -14,7 +15,7 @@
 #define FEMTOSECOND 1e-15f // 1 femtosecond in seconds
 #define ANGSTROM 1e-10f    // 1 angstrom in meters
 #define ANGSTROMSQUARED 1e-20f
-#define COLOUMB_CONSTANT 8.987551787e9f // Coulomb's constant (N⋅m^2/C^2)
+#define COULOMB_CONSTANT 8.987551787e9f // Coulomb's constant (N⋅m^2/C^2)
 #define GRAVITY 6.67430e-11
 
 struct Particle
@@ -27,9 +28,14 @@ struct Particle
     float charge;
 };
 
-__device__ void calculateForces(int32_t idx, Particle *targets, Particle *others, int numParticles)
+__device__ void calculateForces(
+    int32_t idx,
+    Particle *targets,
+    Particle *others,
+    int numParticles)
 {
     Particle &target = targets[idx];
+    target.force = make_float3(0.0f, 0.0f, 0.0f);
 
     for (int i{0}; i < numParticles; ++i)
     {
@@ -47,7 +53,7 @@ __device__ void calculateForces(int32_t idx, Particle *targets, Particle *others
         // float gravMagnitude = GRAVITY * (target.mass * other.mass) / (distance * distance);
 
         // calculate electrostatic force
-        float electroMagnitude = (COLOUMB_CONSTANT * target.charge * other.charge) / (distance * distance);
+        float electroMagnitude = (COULOMB_CONSTANT * target.charge * other.charge) / (distance * distance);
 
         // apply the effects of both gravitational and electrostatic forces
         // target.force = forceDirection * (gravMagnitude + electroMagnitude);
@@ -55,7 +61,10 @@ __device__ void calculateForces(int32_t idx, Particle *targets, Particle *others
     }
 }
 
-__device__ void integrateMotion(int idx, Particle *particles, float deltaTime)
+__device__ void integrateMotion(
+    int idx,
+    Particle *particles,
+    float deltaTime)
 {
     Particle &target = particles[idx];
 
@@ -80,6 +89,7 @@ __global__ void simulationStep(
 
     calculateForces(idx, electrons, protons, numParticles);
     calculateForces(idx, protons, electrons, numParticles);
+    __syncthreads();
     integrateMotion(idx, electrons, deltaTime);
     integrateMotion(idx, protons, deltaTime);
 }
@@ -98,7 +108,7 @@ __global__ void findNearestProton(
 
     const Particle &electron = electrons[idx];
 
-    float closestProtonDistance = MAX_FLOAT;
+    float nearestProtonDistance = MAX_FLOAT;
     int32_t nearestProtonId = -1;
 
     for (int j{0}; j < numParticles; ++j)
@@ -108,14 +118,14 @@ __global__ void findNearestProton(
         float3 posDiff = proton.position - electron.position;
         float distance = length(posDiff);
 
-        if (distance < closestProtonDistance)
+        if (distance < nearestProtonDistance)
         {
-            closestProtonDistance = distance;
+            nearestProtonDistance = distance;
             nearestProtonId = proton.id;
         }
     }
 
-    distances[idx] = closestProtonDistance;
+    distances[idx] = nearestProtonDistance;
     nearestProtonIds[idx] = nearestProtonId;
 }
 
@@ -127,19 +137,34 @@ void hostPrintParticleData(
     const std::vector<float> &distances,
     const std::vector<int> &nearestProtonIds)
 {
+    std::cout << "=================== Step " << step << " ===================" << std::endl;
     for (int i = 0; i < numParticles; ++i)
     {
         const Particle &electron = electrons[i];
         const Particle &proton = protons[i];
 
-        printf("Step %d:\n", step);
-        printf("Electron %d:\nPosition = (%f, %f, %f), Velocity = (%f, %f, %f)\n",
-               electron.id, electron.position.x, electron.position.y, electron.position.z,
-               electron.velocity.x, electron.velocity.y, electron.velocity.z);
-        printf("Proton %d:\nPosition = (%f, %f, %f), Velocity = (%f, %f, %f)\n",
-               proton.id, proton.position.x, proton.position.y, proton.position.z,
-               proton.velocity.x, proton.velocity.y, proton.velocity.z);
+        float distanceX = proton.position.x - electron.position.x;
+        float distanceY = proton.position.y - electron.position.y;
+        float distanceZ = proton.position.z - electron.position.z;
+
+        float distanceMagnitude = sqrt(pow(distanceX, 2) + pow(distanceY, 2) + pow(distanceZ, 2));
+
+        std::cout << std::scientific << std::setprecision(3);
+
+        std::cout << "Electron " << electron.id << ":" << std::endl
+                  << "\tpos[" << electron.position.x << ", " << electron.position.y << ", " << electron.position.z << "]" << std::endl
+                  << "\tvel[" << electron.velocity.x << ", " << electron.velocity.y << ", " << electron.velocity.z << "]" << std::endl
+                  << "\tfrc[" << electron.force.x << ", " << electron.force.y << ", " << electron.force.z << "]" << std::endl;
+
+        std::cout
+            << "Proton " << proton.id << ":" << std::endl
+            << "\tpos[" << proton.position.x << ", " << proton.position.y << ", " << proton.position.z << "]" << std::endl
+            << "\tvel[" << proton.velocity.x << ", " << proton.velocity.y << ", " << proton.velocity.z << "]" << std::endl
+            << "\tfrc[" << proton.force.x << ", " << proton.force.y << ", " << proton.force.z << "]" << std::endl;
+
+        std::cout << "\tdist = " << distanceMagnitude << std::endl;
     }
+    std::cout << "===============================================" << std::endl;
 }
 
 int main(int argc, char **argv)
@@ -168,9 +193,9 @@ int main(int argc, char **argv)
 
     numSteps = std::stoi(argv[2]);
     // enforce a minimum number of steps
-    if (numSteps < 50)
+    if (numSteps < 20)
     {
-        numSteps = 50;
+        numSteps = 20;
     }
 
     deltaTime = std::stof(argv[3]);
@@ -183,9 +208,9 @@ int main(int argc, char **argv)
 
     std::cout << "Configuration received:" << std::endl;
     std::cout << "-----------------------------------------------------------" << std::endl;
-    std::cout << "\tNumber of particles = " << numParticlesPerGroup << std::endl;
+    std::cout << "\tNumber of particles in each group = " << numParticlesPerGroup << std::endl;
     std::cout << "\tNumber of steps = " << numSteps << std::endl;
-    std::cout << "\tDelta time per step = " << deltaTime << "femtoseconds" << std::endl;
+    std::cout << "\tDelta time per step = " << deltaTime << " seconds" << std::endl;
     std::cout << "-----------------------------------------------------------" << std::endl;
 
     // PARTICLE CONFIGURATION
@@ -214,17 +239,12 @@ int main(int argc, char **argv)
         //                          velRange(rng) * ANGSTROM / FEMTOSECOND);
         // e.force = make_float3(0.0f, 0.0f, 0.0f);
 
-        e.position = make_float3(BOHR_RADIUS, 0.0f, 0.0f);
+        e.position = make_float3(-BOHR_RADIUS, 0.0f, 0.0f);
         e.velocity = make_float3(0.0f, 0.0f, 0.0f);
         e.force = make_float3(0.0f, 0.0f, 0.0f);
 
         e.mass = 9.10938356e-31f;    // electron mass (kg)
         e.charge = -1.602176634e-19; // Charge of electron (Coulombs)
-
-        std::cout << "Electron " << i << " initial position = "
-                  << e.position.x << ", "
-                  << e.position.y << ", "
-                  << e.position.z << std::endl;
     }
 
     protons.resize(numParticlesPerGroup);
@@ -246,11 +266,6 @@ int main(int argc, char **argv)
 
         p.mass = 1.6726219e-27f;    // proton mass (kg)
         p.charge = 1.602176634e-19; // Charge of proton (Coulombs)
-
-        std::cout << "Proton " << i << " initial position = "
-                  << p.position.x << ", "
-                  << p.position.y << ", "
-                  << p.position.z << std::endl;
     }
 
     // TEMP: apply an initial velocity to the electron
@@ -262,17 +277,6 @@ int main(int argc, char **argv)
     // // Set the electron's initial velocity to be perpendicular to the radius vector
     // // Assuming the proton is at the origin and the electron is at position (BOHR_RADIUS, 0, 0)
     // electrons[0].velocity = make_float3(0.0f, v, 0.0f);
-
-    float distanceX = protons[0].position.x - electrons[0].position.x;
-    float distanceY = protons[0].position.y - electrons[0].position.y;
-    float distanceZ = protons[0].position.z - electrons[0].position.z;
-
-    float distanceMagnitude = sqrt(pow(distanceX, 2) + pow(distanceY, 2) + pow(distanceZ, 2));
-    std::cout << "Initial distance between particles = " << distanceMagnitude << std::endl;
-    std::cout << "Initial position difference between particles (X, Y, Z) = "
-              << distanceX << ", "
-              << distanceY << ", "
-              << distanceZ << std::endl;
 
     // LOG FILE SETUP
     //-------------------------------------------------------------------------------
@@ -350,8 +354,8 @@ int main(int argc, char **argv)
             {
                 const Particle &electron = electrons[i];
                 const Particle &proton = protons[nearestProtonIds[i]];
-
-                file << step << "," << electron.id << "," << proton.id << ","
+                file << std::scientific << std::setprecision(3)
+                     << step << "," << electron.id << "," << proton.id << ","
                      << distances[i] << ","
                      << electron.position.x << "," << electron.position.y << "," << electron.position.z << ","
                      << proton.position.x << "," << proton.position.y << "," << proton.position.z << "\n";
@@ -380,7 +384,7 @@ int main(int argc, char **argv)
 
     float milliseconds = 0;
     checkCudaErrors(cudaEventElapsedTime(&milliseconds, cudaStartEvent, cudaStopEvent));
-    std::cout << "Simulation duration = " << milliseconds << "ms" << std::endl;
+    std::cout << std::defaultfloat << "Simulation duration = " << milliseconds << "ms" << std::endl;
 
     // SIMULATION TEARDOWN
     //-------------------------------------------------------------------------------
