@@ -27,26 +27,14 @@ struct Particle
     float charge;
 };
 
-// ###############################################################################
-__global__ void calculateForces(
-    Particle *targetParticles,
-    Particle *otherParticles,
-    int numParticles)
+__device__ void calculateForces(int32_t idx, Particle *targets, Particle *others, int numParticles)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (idx >= numParticles)
-    {
-        return;
-    }
-
-    Particle &target = targetParticles[idx];
-    target.force = make_float3(0.0f, 0.0f, 0.0f);
+    Particle &target = targets[idx];
 
     for (int i{0}; i < numParticles; ++i)
     {
         // obtain reference to each of the other particles
-        Particle &other = otherParticles[i];
+        Particle &other = others[i];
 
         // calculate distance between the two particles
         float3 distanceVector = other.position - target.position;
@@ -67,21 +55,33 @@ __global__ void calculateForces(
     }
 }
 
-__global__ void integrateParticles(
-    Particle *particles,
-    int numParticles,
-    float deltaTime)
+__device__ void integrateMotion(int idx, Particle *particles, float deltaTime)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (idx >= numParticles)
-        return;
-
     Particle &target = particles[idx];
 
     float3 acceleration = target.force / target.mass;
     target.velocity += (acceleration * deltaTime);
     target.position += (target.velocity * deltaTime);
+}
+
+// ###############################################################################
+__global__ void simulationStep(
+    Particle *electrons,
+    Particle *protons,
+    int numParticles,
+    float deltaTime)
+{
+    int32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx >= numParticles)
+    {
+        return;
+    }
+
+    calculateForces(idx, electrons, protons, numParticles);
+    calculateForces(idx, protons, electrons, numParticles);
+    integrateMotion(idx, electrons, deltaTime);
+    integrateMotion(idx, protons, deltaTime);
 }
 
 __global__ void findNearestProton(
@@ -127,28 +127,18 @@ void hostPrintParticleData(
     const std::vector<float> &distances,
     const std::vector<int> &nearestProtonIds)
 {
-    for (int i{0}; i < numParticles; ++i)
+    for (int i = 0; i < numParticles; ++i)
     {
         const Particle &electron = electrons[i];
+        const Particle &proton = protons[i];
 
-        float closestProtonDistance = MAX_FLOAT;
-        // int32_t nearestProtonId = -1;
-
-        for (int j{0}; j < numParticles; ++j)
-        {
-            const Particle &proton = protons[j];
-
-            float3 posDiff = proton.position - electron.position;
-            float distance = length(posDiff);
-
-            if (distance < closestProtonDistance)
-            {
-                closestProtonDistance = distance;
-                // nearestProtonId = proton.id;
-            }
-
-            printf("Step %d: distance = %f\n", step, distance);
-        }
+        printf("Step %d:\n", step);
+        printf("Electron %d:\nPosition = (%f, %f, %f), Velocity = (%f, %f, %f)\n",
+               electron.id, electron.position.x, electron.position.y, electron.position.z,
+               electron.velocity.x, electron.velocity.y, electron.velocity.z);
+        printf("Proton %d:\nPosition = (%f, %f, %f), Velocity = (%f, %f, %f)\n",
+               proton.id, proton.position.x, proton.position.y, proton.position.z,
+               proton.velocity.x, proton.velocity.y, proton.velocity.z);
     }
 }
 
@@ -368,45 +358,21 @@ int main(int argc, char **argv)
             }
         }
 
-        calculateForces<<<gridDim, blockDim>>>(
+        simulationStep<<<gridDim, blockDim>>>(
             d_electrons,
-            d_protons,
-            numParticlesPerGroup);
-
-        checkCudaErrors(cudaDeviceSynchronize());
-
-        calculateForces<<<gridDim, blockDim>>>(
-            d_protons,
-            d_electrons,
-            numParticlesPerGroup);
-
-        // calculate all forces prior to integrating
-        checkCudaErrors(cudaDeviceSynchronize());
-
-        integrateParticles<<<gridDim, blockDim>>>(
-            d_electrons,
-            numParticlesPerGroup,
-            deltaTime);
-
-        checkCudaErrors(cudaDeviceSynchronize());
-
-        integrateParticles<<<gridDim, blockDim>>>(
             d_protons,
             numParticlesPerGroup,
             deltaTime);
 
-        // integrate all particles prior to logging
-        checkCudaErrors(cudaDeviceSynchronize());
-
-        // checkCudaErrors(cudaMemcpy(electrons.data(), d_electrons, particleMem, cudaMemcpyDeviceToHost));
-        // checkCudaErrors(cudaMemcpy(protons.data(), d_protons, particleMem, cudaMemcpyDeviceToHost));
-        // hostPrintParticleData(
-        //     electrons,
-        //     protons,
-        //     numParticlesPerGroup,
-        //     step,
-        //     distances,
-        //     nearestProtonIds);
+        checkCudaErrors(cudaMemcpy(electrons.data(), d_electrons, particleMem, cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(protons.data(), d_protons, particleMem, cudaMemcpyDeviceToHost));
+        hostPrintParticleData(
+            electrons,
+            protons,
+            numParticlesPerGroup,
+            step,
+            distances,
+            nearestProtonIds);
     }
 
     checkCudaErrors(cudaEventRecord(cudaStopEvent));
