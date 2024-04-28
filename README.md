@@ -9,7 +9,7 @@ protons for the purpose of analyzing Hydrogen atom formation.
 
 A long-term idea for what this kind of software might evolve into would be a tool that
 could, if made efficient and scalable, be used to accelerate the discovery and analysis of
-potentially undiscovered materials – or new combinations of materials altogether – more
+potentially undiscovered materials – or new combinations of existing materials – more
 efficiently than humans can on their own with unassisted methods.
 
 Theoretically, by rapidly simulating various possible combinations and interactions of
@@ -31,14 +31,14 @@ However, the code should compile with any recent CUDA version, so just ensure a 
 No major installation is required.  
 Simply change directory into the repository root and then run `make` to build the project executable.  
 
-**Note:** The project makefile is configured to use `-arch=sm_89` when invoking NVCC.  
+**Note:** The project Makefile is configured to use `-arch=sm_89` when invoking NVCC.  
 This may need to be updated for your specific GPU architecture.
 
 ### Usage
 <!-- Use this space to show useful examples of how a project can be used. Additional screenshots, code examples and demos work well in this space. You may also link to more resources. -->
 Once built, execute a simulation using the following syntax:  
 Usage: `./sim_main.exe <num_particles_per_group> <num_steps> <delta_time>`  
-
+Delta time is in femtoseconds.
 
 ### Contact
 
