@@ -31,8 +31,7 @@ struct Particle
 __global__ void calculateForces(
     Particle *targetParticles,
     Particle *otherParticles,
-    int numParticles,
-    float deltaTime)
+    int numParticles)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -57,23 +56,14 @@ __global__ void calculateForces(
 
         // calculate gravitational force
         // F = G * (m1 * m2) / (r^2)
-        float gravMagnitude = GRAVITY * (target.mass * other.mass) / (distance * distance);
-        // calculate electrostatic force
-        float electroMagnitude = COLOUMB_CONSTANT * fabs(target.charge * other.charge) / (distance * distance);
-        float3 force = forceDirection * (gravMagnitude + electroMagnitude);
+        // float gravMagnitude = GRAVITY * (target.mass * other.mass) / (distance * distance);
 
-        if (target.charge * other.charge < 0)
-        {
-            // attractive force
-            target.force -= force;
-            other.force += force;
-        }
-        else
-        {
-            // repulsive force
-            target.force += force;
-            other.force -= force;
-        }
+        // calculate electrostatic force
+        float electroMagnitude = (COLOUMB_CONSTANT * target.charge * other.charge) / (distance * distance);
+
+        // apply the effects of both gravitational and electrostatic forces
+        // target.force = forceDirection * (gravMagnitude + electroMagnitude);
+        target.force = forceDirection * electroMagnitude;
     }
 }
 
@@ -94,7 +84,7 @@ __global__ void integrateParticles(
     target.position += (target.velocity * deltaTime);
 }
 
-__global__ void saveParticleData(
+__global__ void findNearestProton(
     const Particle *electrons,
     const Particle *protons,
     int numParticles,
@@ -108,25 +98,58 @@ __global__ void saveParticleData(
 
     const Particle &electron = electrons[idx];
 
-    float minDistance = MAX_FLOAT;
-    int nearestProtonId = -1;
+    float closestProtonDistance = MAX_FLOAT;
+    int32_t nearestProtonId = -1;
 
-    for (int j = 0; j < numParticles; ++j)
+    for (int j{0}; j < numParticles; ++j)
     {
         const Particle &proton = protons[j];
 
-        // calculate distance between the two particles
-        float distance = length(proton.position - electron.position);
+        float3 posDiff = proton.position - electron.position;
+        float distance = length(posDiff);
 
-        if (distance < minDistance)
+        if (distance < closestProtonDistance)
         {
-            minDistance = distance;
+            closestProtonDistance = distance;
             nearestProtonId = proton.id;
         }
     }
 
-    distances[idx] = minDistance;
+    distances[idx] = closestProtonDistance;
     nearestProtonIds[idx] = nearestProtonId;
+}
+
+void hostPrintParticleData(
+    const std::vector<Particle> &electrons,
+    const std::vector<Particle> &protons,
+    int numParticles,
+    int step,
+    const std::vector<float> &distances,
+    const std::vector<int> &nearestProtonIds)
+{
+    for (int i{0}; i < numParticles; ++i)
+    {
+        const Particle &electron = electrons[i];
+
+        float closestProtonDistance = MAX_FLOAT;
+        // int32_t nearestProtonId = -1;
+
+        for (int j{0}; j < numParticles; ++j)
+        {
+            const Particle &proton = protons[j];
+
+            float3 posDiff = proton.position - electron.position;
+            float distance = length(posDiff);
+
+            if (distance < closestProtonDistance)
+            {
+                closestProtonDistance = distance;
+                // nearestProtonId = proton.id;
+            }
+
+            printf("Step %d: distance = %f\n", step, distance);
+        }
+    }
 }
 
 int main(int argc, char **argv)
@@ -240,10 +263,15 @@ int main(int argc, char **argv)
                   << p.position.z << std::endl;
     }
 
-    // float3 positionVector = electrons[0].position - protons[0].position;
-    // float3 velocityDirection = make_float3(-positionVector.y, positionVector.x, 0.0f);
-    // velocityDirection = normalize(velocityDirection);
-    // electrons[0].velocity = velocityDirection * (1.0f * ANGSTROM / FEMTOSECOND);
+    // TEMP: apply an initial velocity to the electron
+    // float q_e = 1.602176634e-19; // electron charge in Coulombs
+    // float m_e = 9.10938356e-31;  // electron mass in kilograms
+    // float r = BOHR_RADIUS;
+    // // Velocity for circular orbit at the Bohr radius
+    // float v = sqrt((COLOUMB_CONSTANT * q_e * q_e) / (m_e * r));
+    // // Set the electron's initial velocity to be perpendicular to the radius vector
+    // // Assuming the proton is at the origin and the electron is at position (BOHR_RADIUS, 0, 0)
+    // electrons[0].velocity = make_float3(0.0f, v, 0.0f);
 
     float distanceX = protons[0].position.x - electrons[0].position.x;
     float distanceY = protons[0].position.y - electrons[0].position.y;
@@ -272,21 +300,30 @@ int main(int argc, char **argv)
 
     // DEVICE MEMORY SETUP
     //-------------------------------------------------------------------------------
+    size_t particleMem = numParticlesPerGroup * sizeof(Particle);
+    size_t floatMem = numParticlesPerGroup * sizeof(float);
+    size_t intMem = numParticlesPerGroup * sizeof(int32_t);
+
     // allocate device memory for particle groups
     Particle *d_electrons;
     Particle *d_protons;
-    checkCudaErrors(cudaMalloc(&d_electrons, numParticlesPerGroup * sizeof(Particle)));
-    checkCudaErrors(cudaMalloc(&d_protons, numParticlesPerGroup * sizeof(Particle)));
-
-    // copy particle data from host to device
-    checkCudaErrors(cudaMemcpy(d_electrons, electrons.data(), numParticlesPerGroup * sizeof(Particle), cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(d_protons, protons.data(), numParticlesPerGroup * sizeof(Particle), cudaMemcpyHostToDevice));
-
-    // allocate device memory for output arrays
     float *d_distances;
-    int *d_nearestProtonIds;
-    checkCudaErrors(cudaMalloc(&d_distances, numParticlesPerGroup * sizeof(float)));
-    checkCudaErrors(cudaMalloc(&d_nearestProtonIds, numParticlesPerGroup * sizeof(int)));
+    int32_t *d_nearestProtonIds;
+
+    // malloc for particle array input
+    checkCudaErrors(cudaMalloc(&d_electrons, particleMem));
+    checkCudaErrors(cudaMalloc(&d_protons, particleMem));
+
+    // copy particle data to device
+    checkCudaErrors(cudaMemcpy(d_electrons, electrons.data(), particleMem, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_protons, protons.data(), particleMem, cudaMemcpyHostToDevice));
+
+    // malloc/memset for distances output
+    checkCudaErrors(cudaMalloc(&d_distances, floatMem));
+    checkCudaErrors(cudaMemset(d_distances, 0, floatMem));
+    // malloc/memset for proton IDs output
+    checkCudaErrors(cudaMalloc(&d_nearestProtonIds, intMem));
+    checkCudaErrors(cudaMemset(d_nearestProtonIds, 0, intMem));
 
     // SIMULATION LOOP
     //-------------------------------------------------------------------------------
@@ -295,12 +332,18 @@ int main(int argc, char **argv)
     int blockDim = BLOCK_SIZE;
     int gridDim = (numParticlesPerGroup + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    for (int step = 0; step < numSteps; ++step)
+    cudaEvent_t cudaStartEvent, cudaStopEvent;
+    checkCudaErrors(cudaEventCreate(&cudaStartEvent));
+    checkCudaErrors(cudaEventCreate(&cudaStopEvent));
+
+    checkCudaErrors(cudaEventRecord(cudaStartEvent));
+
+    for (uint32_t step{0}; step < numSteps; ++step)
     {
-        // launch the saveParticleData kernel at log intervals
+        // launch the findNearestProton kernel at log intervals
         if (step % logInterval == 0)
         {
-            saveParticleData<<<gridDim, blockDim>>>(
+            findNearestProton<<<gridDim, blockDim>>>(
                 d_electrons,
                 d_protons,
                 numParticlesPerGroup,
@@ -308,10 +351,11 @@ int main(int argc, char **argv)
                 d_distances,
                 d_nearestProtonIds);
 
-            checkCudaErrors(cudaMemcpy(distances.data(), d_distances, numParticlesPerGroup * sizeof(float), cudaMemcpyDeviceToHost));
-            checkCudaErrors(cudaMemcpy(nearestProtonIds.data(), d_nearestProtonIds, numParticlesPerGroup * sizeof(int), cudaMemcpyDeviceToHost));
+            // copy distance and position data back to host for logging
+            checkCudaErrors(cudaMemcpy(distances.data(), d_distances, floatMem, cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(nearestProtonIds.data(), d_nearestProtonIds, intMem, cudaMemcpyDeviceToHost));
 
-            // write the data to the log file
+            // write the resulting data to the log file at each log interval
             for (int i{0}; i < numParticlesPerGroup; ++i)
             {
                 const Particle &electron = electrons[i];
@@ -327,14 +371,14 @@ int main(int argc, char **argv)
         calculateForces<<<gridDim, blockDim>>>(
             d_electrons,
             d_protons,
-            numParticlesPerGroup,
-            deltaTime);
+            numParticlesPerGroup);
+
+        checkCudaErrors(cudaDeviceSynchronize());
 
         calculateForces<<<gridDim, blockDim>>>(
             d_protons,
             d_electrons,
-            numParticlesPerGroup,
-            deltaTime);
+            numParticlesPerGroup);
 
         // calculate all forces prior to integrating
         checkCudaErrors(cudaDeviceSynchronize());
@@ -344,6 +388,8 @@ int main(int argc, char **argv)
             numParticlesPerGroup,
             deltaTime);
 
+        checkCudaErrors(cudaDeviceSynchronize());
+
         integrateParticles<<<gridDim, blockDim>>>(
             d_protons,
             numParticlesPerGroup,
@@ -352,10 +398,23 @@ int main(int argc, char **argv)
         // integrate all particles prior to logging
         checkCudaErrors(cudaDeviceSynchronize());
 
-        // copy the updated particle data back to the host after integrating
-        checkCudaErrors(cudaMemcpy(electrons.data(), d_electrons, numParticlesPerGroup * sizeof(Particle), cudaMemcpyDeviceToHost));
-        checkCudaErrors(cudaMemcpy(protons.data(), d_protons, numParticlesPerGroup * sizeof(Particle), cudaMemcpyDeviceToHost));
+        // checkCudaErrors(cudaMemcpy(electrons.data(), d_electrons, particleMem, cudaMemcpyDeviceToHost));
+        // checkCudaErrors(cudaMemcpy(protons.data(), d_protons, particleMem, cudaMemcpyDeviceToHost));
+        // hostPrintParticleData(
+        //     electrons,
+        //     protons,
+        //     numParticlesPerGroup,
+        //     step,
+        //     distances,
+        //     nearestProtonIds);
     }
+
+    checkCudaErrors(cudaEventRecord(cudaStopEvent));
+    checkCudaErrors(cudaEventSynchronize(cudaStopEvent));
+
+    float milliseconds = 0;
+    checkCudaErrors(cudaEventElapsedTime(&milliseconds, cudaStartEvent, cudaStopEvent));
+    std::cout << "Simulation duration = " << milliseconds << "ms" << std::endl;
 
     // SIMULATION TEARDOWN
     //-------------------------------------------------------------------------------
@@ -366,6 +425,6 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaFree(d_distances));
     checkCudaErrors(cudaFree(d_nearestProtonIds));
 
-    std::cout << "Simulation completed successfully." << std::endl;
+    std::cout << "Simulation teardown complete." << std::endl;
     return 0;
 }
