@@ -53,11 +53,11 @@ __device__ void calculateForces(
         // float gravMagnitude = GRAVITY * (target.mass * other.mass) / (distance * distance);
 
         // calculate electrostatic force
-        float electroMagnitude = (COULOMB_CONSTANT * target.charge * other.charge) / (distance * distance);
+        float electroMagnitude = COULOMB_CONSTANT * (fabs(target.charge * other.charge) / (distance * distance));
 
         // apply the effects of both gravitational and electrostatic forces
         // target.force = forceDirection * (gravMagnitude + electroMagnitude);
-        target.force = forceDirection * electroMagnitude;
+        target.force += forceDirection * electroMagnitude;
     }
 }
 
@@ -70,6 +70,7 @@ __device__ void integrateMotion(
 
     float3 acceleration = target.force / target.mass;
     target.velocity += (acceleration * deltaTime);
+    target.velocity *= 0.995; // dampening
     target.position += (target.velocity * deltaTime);
 }
 
@@ -147,7 +148,7 @@ void hostPrintParticleData(
         float distanceY = proton.position.y - electron.position.y;
         float distanceZ = proton.position.z - electron.position.z;
 
-        float distanceMagnitude = sqrt(pow(distanceX, 2) + pow(distanceY, 2) + pow(distanceZ, 2));
+        float distance = sqrt(pow(distanceX, 2) + pow(distanceY, 2) + pow(distanceZ, 2));
 
         std::cout << std::scientific << std::setprecision(3);
 
@@ -162,7 +163,8 @@ void hostPrintParticleData(
             << "\tvel[" << proton.velocity.x << ", " << proton.velocity.y << ", " << proton.velocity.z << "]" << std::endl
             << "\tfrc[" << proton.force.x << ", " << proton.force.y << ", " << proton.force.z << "]" << std::endl;
 
-        std::cout << "\tdist = " << distanceMagnitude << std::endl;
+        std::cout << "proton frcDir[" << distanceX / distance << ", " << distanceY / distance << ", " << distanceZ / distance << "]" << std::endl;
+        std::cout << "dist = " << distance << std::endl;
     }
     std::cout << "===============================================" << std::endl;
 }
@@ -239,7 +241,7 @@ int main(int argc, char **argv)
         //                          velRange(rng) * ANGSTROM / FEMTOSECOND);
         // e.force = make_float3(0.0f, 0.0f, 0.0f);
 
-        e.position = make_float3(-BOHR_RADIUS, 0.0f, 0.0f);
+        e.position = make_float3(BOHR_RADIUS, 0.0f, 0.0f);
         e.velocity = make_float3(0.0f, 0.0f, 0.0f);
         e.force = make_float3(0.0f, 0.0f, 0.0f);
 
@@ -269,14 +271,14 @@ int main(int argc, char **argv)
     }
 
     // TEMP: apply an initial velocity to the electron
-    // float q_e = 1.602176634e-19; // electron charge in Coulombs
-    // float m_e = 9.10938356e-31;  // electron mass in kilograms
-    // float r = BOHR_RADIUS;
-    // // Velocity for circular orbit at the Bohr radius
-    // float v = sqrt((COLOUMB_CONSTANT * q_e * q_e) / (m_e * r));
-    // // Set the electron's initial velocity to be perpendicular to the radius vector
-    // // Assuming the proton is at the origin and the electron is at position (BOHR_RADIUS, 0, 0)
-    // electrons[0].velocity = make_float3(0.0f, v, 0.0f);
+    float q_e = 1.602176634e-19; // electron charge in Coulombs
+    float m_e = 9.10938356e-31;  // electron mass in kilograms
+    float r = BOHR_RADIUS;
+    // Velocity for circular orbit at the Bohr radius
+    float v = sqrt((COULOMB_CONSTANT * q_e * q_e) / (m_e * r));
+    // Set the electron's initial velocity to be perpendicular to the radius vector
+    // Assuming the proton is at the origin and the electron is at position (BOHR_RADIUS, 0, 0)
+    electrons[0].velocity = make_float3(0.0f, v, 0.0f);
 
     // LOG FILE SETUP
     //-------------------------------------------------------------------------------
@@ -345,7 +347,9 @@ int main(int argc, char **argv)
                 d_distances,
                 d_nearestProtonIds);
 
-            // copy distance and position data back to host for logging
+            // copy all particle data back to host for logging
+            checkCudaErrors(cudaMemcpy(electrons.data(), d_electrons, particleMem, cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(protons.data(), d_protons, particleMem, cudaMemcpyDeviceToHost));
             checkCudaErrors(cudaMemcpy(distances.data(), d_distances, floatMem, cudaMemcpyDeviceToHost));
             checkCudaErrors(cudaMemcpy(nearestProtonIds.data(), d_nearestProtonIds, intMem, cudaMemcpyDeviceToHost));
 
@@ -368,15 +372,15 @@ int main(int argc, char **argv)
             numParticlesPerGroup,
             deltaTime);
 
-        checkCudaErrors(cudaMemcpy(electrons.data(), d_electrons, particleMem, cudaMemcpyDeviceToHost));
-        checkCudaErrors(cudaMemcpy(protons.data(), d_protons, particleMem, cudaMemcpyDeviceToHost));
-        hostPrintParticleData(
-            electrons,
-            protons,
-            numParticlesPerGroup,
-            step,
-            distances,
-            nearestProtonIds);
+        // checkCudaErrors(cudaMemcpy(electrons.data(), d_electrons, particleMem, cudaMemcpyDeviceToHost));
+        // checkCudaErrors(cudaMemcpy(protons.data(), d_protons, particleMem, cudaMemcpyDeviceToHost));
+        // hostPrintParticleData(
+        //     electrons,
+        //     protons,
+        //     numParticlesPerGroup,
+        //     step,
+        //     distances,
+        //     nearestProtonIds);
     }
 
     checkCudaErrors(cudaEventRecord(cudaStopEvent));
