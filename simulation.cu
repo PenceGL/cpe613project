@@ -11,12 +11,11 @@
 #include "helper_math.h"
 
 #define BLOCK_SIZE 256
-#define MAX_FLOAT 3.402823466e+38f
-#define FEMTOSECOND 1e-15f // 1 femtosecond in seconds
-#define ANGSTROM 1e-10f    // 1 angstrom in meters
-#define ANGSTROMSQUARED 1e-20f
+#define MAX_FLOAT 3.402823466e+38f      // used for distance comparisons
+#define FEMTOSECOND 1e-15f              // 1 femtosecond in seconds
+#define ANGSTROM 1e-10f                 // 1 angstrom in meters
 #define COULOMB_CONSTANT 8.987551787e9f // Coulomb's constant (N⋅m^2/C^2)
-#define GRAVITY 6.67430e-11
+#define GRAVITY 6.67430e-11             // gravitational constant (N⋅m^2⋅kg^−2)
 
 struct Particle
 {
@@ -42,10 +41,11 @@ __device__ void calculateForces(
         // obtain reference to each of the other particles
         Particle &other = others[i];
 
-        // calculate distance between the two particles
+        // calculate vector pointing from the target to the other particle
         float3 distanceVector = other.position - target.position;
+        // obtain the magnitude of the distance vector
         float distance = length(distanceVector);
-        // calculate the unit vector pointing between the objects
+        // divide to obtain the unit vector pointing from the target to the other
         float3 forceDirection = distanceVector / distance;
 
         // calculate gravitational force
@@ -70,7 +70,6 @@ __device__ void integrateMotion(
 
     float3 acceleration = target.force / target.mass;
     target.velocity += (acceleration * deltaTime);
-    target.velocity *= 0.995; // dampening
     target.position += (target.velocity * deltaTime);
 }
 
@@ -270,12 +269,12 @@ int main(int argc, char **argv)
         p.charge = 1.602176634e-19; // Charge of proton (Coulombs)
     }
 
-    // TEMP: apply an initial velocity to the electron
-    float q_e = 1.602176634e-19; // electron charge in Coulombs
-    float m_e = 9.10938356e-31;  // electron mass in kilograms
+    // TEMP: apply an initial velocity to the electron that causes it to orbit the proton
+    float electron_charge = 1.602176634e-19; // electron charge in Coulombs
+    float electron_mass = 9.10938356e-31;    // electron mass in kilograms
     float r = BOHR_RADIUS;
     // Velocity for circular orbit at the Bohr radius
-    float v = sqrt((COULOMB_CONSTANT * q_e * q_e) / (m_e * r));
+    float v = sqrt((COULOMB_CONSTANT * electron_charge * electron_charge) / (electron_mass * r));
     // Set the electron's initial velocity to be perpendicular to the radius vector
     // Assuming the proton is at the origin and the electron is at position (BOHR_RADIUS, 0, 0)
     electrons[0].velocity = make_float3(0.0f, v, 0.0f);
@@ -284,7 +283,7 @@ int main(int argc, char **argv)
     //-------------------------------------------------------------------------------
     // save interval in number of time steps
     // data will be logged to the output file at increments of this value
-    int logInterval = 100;
+    int logInterval = 25;
 
     std::cout << "Creating log file: " << log_name << std::endl;
     std::ofstream file(log_name);
