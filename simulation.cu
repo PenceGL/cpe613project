@@ -81,7 +81,7 @@ __global__ void simulationStep(
     float deltaTime)
 {
     int32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-
+    
     if (idx >= numParticles)
     {
         return;
@@ -89,6 +89,7 @@ __global__ void simulationStep(
 
     calculateForces(idx, electrons, protons, numParticles);
     calculateForces(idx, protons, electrons, numParticles);
+    // synchronize to ensure all forces are updated before modifying motion of particles
     __syncthreads();
     integrateMotion(idx, electrons, deltaTime);
     integrateMotion(idx, protons, deltaTime);
@@ -200,8 +201,10 @@ int main(int argc, char **argv)
     }
 
     deltaTime = std::stof(argv[3]);
-    if (deltaTime < 0.001)
+    if (deltaTime > 0.001)
     {
+        std::cout << "Provided time step is too large and will cause loss of simulation "
+                  << "fidelity. Reverting to default of 0.001 femtoseconds." << std::endl;
         deltaTime = 0.001;
     }
     // convert delta time to femtoseconds
@@ -214,7 +217,7 @@ int main(int argc, char **argv)
     std::cout << "\tDelta time per step = " << deltaTime << " seconds" << std::endl;
     std::cout << "-----------------------------------------------------------" << std::endl;
 
-    // PARTICLE CONFIGURATION
+    // PARTICLE INSTANTIATION/CONFIGURATION
     //-------------------------------------------------------------------------------
     // create two particle groups: one for electrons and one for protons
     std::vector<Particle> electrons;
