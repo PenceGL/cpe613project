@@ -16,6 +16,7 @@
 #define ANGSTROM 1e-10f                 // 1 angstrom in meters
 #define COULOMB_CONSTANT 8.987551787e9f // Coulomb's constant (N⋅m^2/C^2)
 #define GRAVITY 6.67430e-11             // gravitational constant (N⋅m^2⋅kg^−2)
+#define BOHR_RADIUS 0.529177f * ANGSTROM
 
 struct Particle
 {
@@ -31,33 +32,47 @@ __device__ void calculateForces(
     int32_t idx,
     Particle *targets,
     Particle *others,
-    int numParticles)
+    int numParticles,
+    Particle *sharedParticles)
 {
-    Particle &target = targets[idx];
-    target.force = make_float3(0.0f, 0.0f, 0.0f);
-
-    for (int i{0}; i < numParticles; ++i)
+    for (int i{0}; i < numParticles; i += blockDim.x)
     {
-        // obtain reference to each of the other particles
-        Particle &other = others[i];
+        int loadIdx = (i + threadIdx.x);
+        if (loadIdx < numParticles)
+        {
+            sharedParticles[threadIdx.x] = others[loadIdx];
+        }
+        // sync to ensure all particles have been loaded by all threads
+        __syncthreads();
 
-        // calculate vector pointing from the target to the other particle
-        float3 distanceVector = other.position - target.position;
-        // obtain the magnitude of the distance vector
-        float distance = length(distanceVector);
-        // divide to obtain the unit vector pointing from the target to the other
-        float3 forceDirection = distanceVector / distance;
+        for (int j{0}; j < blockDim.x && (i + j) < numParticles; ++j)
+        {
+            Particle &target = targets[idx];
+            target.force = make_float3(0.0f, 0.0f, 0.0f);
 
-        // calculate gravitational force
-        // F = G * (m1 * m2) / (r^2)
-        // float gravMagnitude = GRAVITY * (target.mass * other.mass) / (distance * distance);
+            // obtain reference to each of the other particles
+            Particle &other = sharedParticles[j];
 
-        // calculate electrostatic force
-        float electroMagnitude = COULOMB_CONSTANT * (fabs(target.charge * other.charge) / (distance * distance));
+            // calculate vector pointing from the target to the other particle
+            float3 distanceVector = other.position - target.position;
+            // obtain the magnitude of the distance vector
+            float distance = length(distanceVector);
+            // divide to obtain the unit vector pointing from the target to the other
+            float3 forceDirection = distanceVector / distance;
 
-        // apply the effects of both gravitational and electrostatic forces
-        // target.force = forceDirection * (gravMagnitude + electroMagnitude);
-        target.force += forceDirection * electroMagnitude;
+            // calculate gravitational force
+            // F = G * (m1 * m2) / (r^2)
+            // float gravMagnitude = GRAVITY * (target.mass * other.mass) / (distance * distance);
+
+            // calculate electrostatic force
+            float electroMagnitude = COULOMB_CONSTANT * (fabs(target.charge * other.charge) / (distance * distance));
+
+            // apply the effects of both gravitational and electrostatic forces
+            // target.force = forceDirection * (gravMagnitude + electroMagnitude);
+            target.force += forceDirection * electroMagnitude;
+        }
+        // ensure all threads have finished using shared memory before next load
+        __syncthreads();
     }
 }
 
@@ -80,19 +95,18 @@ __global__ void simulationStep(
     int numParticles,
     float deltaTime)
 {
+    extern __shared__ Particle sharedParticles[];
     int32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
-    if (idx >= numParticles)
-    {
-        return;
-    }
 
-    calculateForces(idx, electrons, protons, numParticles);
-    calculateForces(idx, protons, electrons, numParticles);
-    // synchronize to ensure all forces are updated before modifying motion of particles
-    __syncthreads();
-    integrateMotion(idx, electrons, deltaTime);
-    integrateMotion(idx, protons, deltaTime);
+    if (idx < numParticles)
+    {
+        calculateForces(idx, electrons, protons, numParticles, sharedParticles);
+        calculateForces(idx, protons, electrons, numParticles, sharedParticles);
+        // synchronize to ensure all forces are updated before modifying motion of particles
+        __syncthreads();
+        integrateMotion(idx, electrons, deltaTime);
+        integrateMotion(idx, protons, deltaTime);
+    }
 }
 
 __global__ void findNearestProton(
@@ -228,24 +242,22 @@ int main(int argc, char **argv)
     std::uniform_real_distribution<float> posRange(0.0f, 0.1f);
     std::uniform_real_distribution<float> velRange(-0.01f, 0.01f);
 
-    const float BOHR_RADIUS = 0.529177f * ANGSTROM;
-
     electrons.resize(numParticlesPerGroup);
     for (int i{0}; i < numParticlesPerGroup; ++i)
     {
         Particle &e = electrons[i];
         e.id = i;
-        // e.position = make_float3(posRange(rng) * ANGSTROM,
-        //                          posRange(rng) * ANGSTROM,
-        //                          posRange(rng) * ANGSTROM);
-        // e.velocity = make_float3(velRange(rng) * ANGSTROM / FEMTOSECOND,
-        //                          velRange(rng) * ANGSTROM / FEMTOSECOND,
-        //                          velRange(rng) * ANGSTROM / FEMTOSECOND);
-        // e.force = make_float3(0.0f, 0.0f, 0.0f);
-
-        e.position = make_float3(BOHR_RADIUS, 0.0f, 0.0f);
-        e.velocity = make_float3(0.0f, 0.0f, 0.0f);
+        e.position = make_float3(posRange(rng) * ANGSTROM,
+                                 posRange(rng) * ANGSTROM,
+                                 posRange(rng) * ANGSTROM);
+        e.velocity = make_float3(velRange(rng) * ANGSTROM / FEMTOSECOND,
+                                 velRange(rng) * ANGSTROM / FEMTOSECOND,
+                                 velRange(rng) * ANGSTROM / FEMTOSECOND);
         e.force = make_float3(0.0f, 0.0f, 0.0f);
+
+        // e.position = make_float3(BOHR_RADIUS, 0.0f, 0.0f);
+        // e.velocity = make_float3(0.0f, 0.0f, 0.0f);
+        // e.force = make_float3(0.0f, 0.0f, 0.0f);
 
         e.mass = 9.10938356e-31f;    // electron mass (kg)
         e.charge = -1.602176634e-19; // Charge of electron (Coulombs)
@@ -256,31 +268,31 @@ int main(int argc, char **argv)
     {
         Particle &p = protons[i];
         p.id = i;
-        // p.position = make_float3(posRange(rng) * ANGSTROM,
-        //                          posRange(rng) * ANGSTROM,
-        //                          posRange(rng) * ANGSTROM);
-        // p.velocity = make_float3(velRange(rng) * ANGSTROM / FEMTOSECOND,
-        //                          velRange(rng) * ANGSTROM / FEMTOSECOND,
-        //                          velRange(rng) * ANGSTROM / FEMTOSECOND);
-        // p.force = make_float3(0.0f, 0.0f, 0.0f);
-
-        p.position = make_float3(0.0f, 0.0f, 0.0f);
-        p.velocity = make_float3(0.0f, 0.0f, 0.0f);
+        p.position = make_float3(posRange(rng) * ANGSTROM,
+                                 posRange(rng) * ANGSTROM,
+                                 posRange(rng) * ANGSTROM);
+        p.velocity = make_float3(velRange(rng) * ANGSTROM / FEMTOSECOND,
+                                 velRange(rng) * ANGSTROM / FEMTOSECOND,
+                                 velRange(rng) * ANGSTROM / FEMTOSECOND);
         p.force = make_float3(0.0f, 0.0f, 0.0f);
+
+        // p.position = make_float3(0.0f, 0.0f, 0.0f);
+        // p.velocity = make_float3(0.0f, 0.0f, 0.0f);
+        // p.force = make_float3(0.0f, 0.0f, 0.0f);
 
         p.mass = 1.6726219e-27f;    // proton mass (kg)
         p.charge = 1.602176634e-19; // Charge of proton (Coulombs)
     }
 
     // TEMP: apply an initial velocity to the electron that causes it to orbit the proton
-    float electron_charge = 1.602176634e-19; // electron charge in Coulombs
-    float electron_mass = 9.10938356e-31;    // electron mass in kilograms
-    float r = BOHR_RADIUS;
-    // Velocity for circular orbit at the Bohr radius
-    float v = sqrt((COULOMB_CONSTANT * electron_charge * electron_charge) / (electron_mass * r));
-    // Set the electron's initial velocity to be perpendicular to the radius vector
-    // Assuming the proton is at the origin and the electron is at position (BOHR_RADIUS, 0, 0)
-    electrons[0].velocity = make_float3(0.0f, v, 0.0f);
+    // float electron_charge = 1.602176634e-19; // electron charge in Coulombs
+    // float electron_mass = 9.10938356e-31;    // electron mass in kilograms
+    // float r = BOHR_RADIUS;
+    // // Velocity for circular orbit at the Bohr radius
+    // float v = sqrt((COULOMB_CONSTANT * electron_charge * electron_charge) / (electron_mass * r));
+    // // Set the electron's initial velocity to be perpendicular to the radius vector
+    // // Assuming the proton is at the origin and the electron is at position (BOHR_RADIUS, 0, 0)
+    // electrons[0].velocity = make_float3(0.0f, v, 0.0f);
 
     // LOG FILE SETUP
     //-------------------------------------------------------------------------------
@@ -323,12 +335,13 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaMalloc(&d_nearestProtonIds, intMem));
     checkCudaErrors(cudaMemset(d_nearestProtonIds, 0, intMem));
 
+    int blockDim = BLOCK_SIZE;
+    int gridDim = (numParticlesPerGroup + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    int sharedMemSize = sizeof(Particle) * BLOCK_SIZE;
+
     // SIMULATION LOOP
     //-------------------------------------------------------------------------------
     std::cout << "Launching simulation..." << std::endl;
-
-    int blockDim = BLOCK_SIZE;
-    int gridDim = (numParticlesPerGroup + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
     cudaEvent_t cudaStartEvent, cudaStopEvent;
     checkCudaErrors(cudaEventCreate(&cudaStartEvent));
@@ -368,21 +381,11 @@ int main(int argc, char **argv)
             }
         }
 
-        simulationStep<<<gridDim, blockDim>>>(
+        simulationStep<<<gridDim, blockDim, sharedMemSize>>>(
             d_electrons,
             d_protons,
             numParticlesPerGroup,
             deltaTime);
-
-        // checkCudaErrors(cudaMemcpy(electrons.data(), d_electrons, particleMem, cudaMemcpyDeviceToHost));
-        // checkCudaErrors(cudaMemcpy(protons.data(), d_protons, particleMem, cudaMemcpyDeviceToHost));
-        // hostPrintParticleData(
-        //     electrons,
-        //     protons,
-        //     numParticlesPerGroup,
-        //     step,
-        //     distances,
-        //     nearestProtonIds);
     }
 
     checkCudaErrors(cudaEventRecord(cudaStopEvent));
