@@ -35,6 +35,9 @@ __device__ void calculateForces(
     int numParticles,
     Particle *sharedParticles)
 {
+    Particle &target = targets[idx];
+    target.force = make_float3(0.0f, 0.0f, 0.0f);
+
     for (int i{0}; i < numParticles; i += blockDim.x)
     {
         int loadIdx = (i + threadIdx.x);
@@ -47,9 +50,6 @@ __device__ void calculateForces(
 
         for (int j{0}; j < blockDim.x && (i + j) < numParticles; ++j)
         {
-            Particle &target = targets[idx];
-            target.force = make_float3(0.0f, 0.0f, 0.0f);
-
             // obtain reference to each of the other particles
             Particle &other = sharedParticles[j];
 
@@ -60,15 +60,10 @@ __device__ void calculateForces(
             // divide to obtain the unit vector pointing from the target to the other
             float3 forceDirection = distanceVector / distance;
 
-            // calculate gravitational force
-            // F = G * (m1 * m2) / (r^2)
-            // float gravMagnitude = GRAVITY * (target.mass * other.mass) / (distance * distance);
-
             // calculate electrostatic force
-            float electroMagnitude = COULOMB_CONSTANT * (fabs(target.charge * other.charge) / (distance * distance));
+            float electroMagnitude = COULOMB_CONSTANT *
+                                     (fabs(target.charge * other.charge) / (distance * distance));
 
-            // apply the effects of both gravitational and electrostatic forces
-            // target.force = forceDirection * (gravMagnitude + electroMagnitude);
             target.force += forceDirection * electroMagnitude;
         }
         // ensure all threads have finished using shared memory before next load
@@ -239,8 +234,8 @@ int main(int argc, char **argv)
 
     // random number generator
     std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<float> posRange(0.0f, 0.1f);
-    std::uniform_real_distribution<float> velRange(-0.01f, 0.01f);
+    std::uniform_real_distribution<float> posRange(-0.5f, 0.5f);
+    std::uniform_real_distribution<float> velRange(0.0, 0.01f);
 
     electrons.resize(numParticlesPerGroup);
     for (int i{0}; i < numParticlesPerGroup; ++i)
@@ -250,10 +245,11 @@ int main(int argc, char **argv)
         e.position = make_float3(posRange(rng) * ANGSTROM,
                                  posRange(rng) * ANGSTROM,
                                  posRange(rng) * ANGSTROM);
+        //  0.0);
         e.velocity = make_float3(velRange(rng) * ANGSTROM / FEMTOSECOND,
                                  velRange(rng) * ANGSTROM / FEMTOSECOND,
                                  velRange(rng) * ANGSTROM / FEMTOSECOND);
-        e.force = make_float3(0.0f, 0.0f, 0.0f);
+        //  0.0);
 
         // e.position = make_float3(BOHR_RADIUS, 0.0f, 0.0f);
         // e.velocity = make_float3(0.0f, 0.0f, 0.0f);
@@ -271,10 +267,11 @@ int main(int argc, char **argv)
         p.position = make_float3(posRange(rng) * ANGSTROM,
                                  posRange(rng) * ANGSTROM,
                                  posRange(rng) * ANGSTROM);
+        //  0.0);
         p.velocity = make_float3(velRange(rng) * ANGSTROM / FEMTOSECOND,
                                  velRange(rng) * ANGSTROM / FEMTOSECOND,
                                  velRange(rng) * ANGSTROM / FEMTOSECOND);
-        p.force = make_float3(0.0f, 0.0f, 0.0f);
+        //  0.0);
 
         // p.position = make_float3(0.0f, 0.0f, 0.0f);
         // p.velocity = make_float3(0.0f, 0.0f, 0.0f);
@@ -351,7 +348,6 @@ int main(int argc, char **argv)
 
     for (uint32_t step{0}; step < numSteps; ++step)
     {
-        // launch the findNearestProton kernel at log intervals
         if (step % logInterval == 0)
         {
             findNearestProton<<<gridDim, blockDim>>>(
