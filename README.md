@@ -22,12 +22,15 @@ simulate Hydrogen atom formation through instantiating two groups of protons and
 electrons and analyzing the resulting data from their interaction.
 
 ### Prerequisites
-For this project, I am using the following CUDA version:  
+* Linux operating system (WSL Ubuntu was used for development)
+* CUDA Toolkit installed  
+
+For this project, I used the following CUDA version:  
 `CUDA compilation tools, release 12.4, V12.4.99 Build cuda_12.4.r12.4/compiler.33961263_0`  
 However, the code should compile with any recent CUDA version, so just ensure a version newer than 12.2 is installed.
 
 ### Installation
-No major installation is required.  
+No installation is required that is specific to the project other than ensuring the prerequisites above are met.  
 Simply change directory into the repository root and then run `make` to build the project executable.
 
 **Note:** The project Makefile is configured to use `-arch=sm_86` when invoking NVCC.  
