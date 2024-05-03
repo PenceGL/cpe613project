@@ -245,16 +245,9 @@ int main(int argc, char **argv)
         e.position = make_float3(posRange(rng) * ANGSTROM,
                                  posRange(rng) * ANGSTROM,
                                  posRange(rng) * ANGSTROM);
-        //  0.0);
         e.velocity = make_float3(velRange(rng) * ANGSTROM / FEMTOSECOND,
                                  velRange(rng) * ANGSTROM / FEMTOSECOND,
                                  velRange(rng) * ANGSTROM / FEMTOSECOND);
-        //  0.0);
-
-        // e.position = make_float3(BOHR_RADIUS, 0.0f, 0.0f);
-        // e.velocity = make_float3(0.0f, 0.0f, 0.0f);
-        // e.force = make_float3(0.0f, 0.0f, 0.0f);
-
         e.mass = 9.10938356e-31f;    // electron mass (kg)
         e.charge = -1.602176634e-19; // Charge of electron (Coulombs)
     }
@@ -267,29 +260,12 @@ int main(int argc, char **argv)
         p.position = make_float3(posRange(rng) * ANGSTROM,
                                  posRange(rng) * ANGSTROM,
                                  posRange(rng) * ANGSTROM);
-        //  0.0);
         p.velocity = make_float3(velRange(rng) * ANGSTROM / FEMTOSECOND,
                                  velRange(rng) * ANGSTROM / FEMTOSECOND,
                                  velRange(rng) * ANGSTROM / FEMTOSECOND);
-        //  0.0);
-
-        // p.position = make_float3(0.0f, 0.0f, 0.0f);
-        // p.velocity = make_float3(0.0f, 0.0f, 0.0f);
-        // p.force = make_float3(0.0f, 0.0f, 0.0f);
-
         p.mass = 1.6726219e-27f;    // proton mass (kg)
         p.charge = 1.602176634e-19; // Charge of proton (Coulombs)
     }
-
-    // TEMP: apply an initial velocity to the electron that causes it to orbit the proton
-    // float electron_charge = 1.602176634e-19; // electron charge in Coulombs
-    // float electron_mass = 9.10938356e-31;    // electron mass in kilograms
-    // float r = BOHR_RADIUS;
-    // // Velocity for circular orbit at the Bohr radius
-    // float v = sqrt((COULOMB_CONSTANT * electron_charge * electron_charge) / (electron_mass * r));
-    // // Set the electron's initial velocity to be perpendicular to the radius vector
-    // // Assuming the proton is at the origin and the electron is at position (BOHR_RADIUS, 0, 0)
-    // electrons[0].velocity = make_float3(0.0f, v, 0.0f);
 
     // LOG FILE SETUP
     //-------------------------------------------------------------------------------
