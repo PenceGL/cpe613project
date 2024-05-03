@@ -38,6 +38,18 @@ Once built, execute a simulation using the following syntax:
 Usage: `./sim_main.exe <num_particles_per_group> <num_steps> <delta_time>`  
 Delta time is in femtoseconds. It is recommended to use a delta time value of 0.001 or 0.0001. Anything larger than that will result in the per-step calculations to be too low resolution and a degradation of simulation accuracy.
 
+### Specific Scenarios
+To recreate the output of a single stable Hydrogen atom, instantiate a single particle in each group, then modify the position of the electron to use the following values:
+Position X = 5.29177210903e-11
+Velocity Y = 2187693.75
+
+All other values should be 0, including the position and velocity of the proton.  
+Ensure that the delta time input argument is set to a minimum of 0.001 in order to maintain fidelity. Anything larger will start to lose data resolution and result in incorrect and erratic outputs.  
+Using these conditions will set up the initial velocity and position of the electron in such a way that it is more likely to form a stable orbit around the proton.  
+After running the simulation, the generated particle_data.csv file can then be scanned in using the `particle_pair_plot.py` Python script in order to generate a static plot over time, or can be fed into the `particle_anim.py` script to generate an actual orbiting animation.  
+
+As can be seen from the resulting plots, the simulation correctly models the electrostatic force between the proton and electron and the electrons orbit around the proton remains stable for any given simulation length.
+
 ### Contact
 
 George Pence - gp0038@uah.edu
